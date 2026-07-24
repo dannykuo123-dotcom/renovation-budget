@@ -565,7 +565,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${kindLabel[kind]}</p><h3>${existing ? "編輯紀錄" : `新增${kindLabel[kind]}`}</h3></div><button class="icon-button" data-action="close-modal">×</button></div>
     <form id="entry-form" class="form-grid">
-      <label>紀錄類型<select name="kind"><option value="expense" ${kind === "expense" ? "selected" : ""}>支出</option><option value="income" ${kind === "income" ? "selected" : ""}>資金入帳</option><option value="refund" ${kind === "refund" ? "selected" : ""}>退款</option></select></label>
+      <label>紀錄類型<input value="${kindLabel[kind]}" readonly aria-readonly="true" /></label><input name="kind" type="hidden" value="${kind}" />
       <label>品項／用途<input name="description" maxlength="80" required value="${esc(existing?.description ?? "")}" placeholder="例如：一樓配電材料" /></label>
       <label>金額<input name="amount" type="number" min="1" step="1" required value="${existing?.amount ?? ""}" /></label>
       <label>日期<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
@@ -580,7 +580,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存紀錄</button></div>
     </form>`);
   const formElement = document.querySelector<HTMLFormElement>("#entry-form")!;
-  const kindInput = formElement.elements.namedItem("kind") as HTMLSelectElement;
+  const kindInput = formElement.elements.namedItem("kind") as HTMLInputElement;
   const statusInput = formElement.elements.namedItem("status") as HTMLSelectElement;
   const sourceInput = formElement.elements.namedItem("refundOfEntryId") as HTMLSelectElement;
   const categoryInput = formElement.elements.namedItem("categoryId") as HTMLSelectElement;
@@ -620,7 +620,6 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     if (isRefundKind && sourceInput.value) applySource();
     if (!isRefundKind) amountInput.removeAttribute("max");
   };
-  kindInput.addEventListener("change", sync);
   sourceInput.addEventListener("change", applySource);
   sync();
   formElement.addEventListener("submit", async (event) => {
