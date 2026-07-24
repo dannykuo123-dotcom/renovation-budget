@@ -1,5 +1,5 @@
 export type EntryKind = "income" | "expense" | "refund";
-export type EntryStatus = "posted" | "pending" | "refunded" | "void";
+export type EntryStatus = "posted" | "pending" | "void";
 export type ProjectStatus = "active" | "completed" | "archived";
 
 export interface Attachment {
@@ -23,6 +23,7 @@ export interface LedgerEntry {
   id: string;
   kind: EntryKind;
   status: EntryStatus;
+  refundOfEntryId: string | null;
   description: string;
   amount: number;
   occurredOn: string;

@@ -27,6 +27,7 @@ export interface ProjectInput {
 export interface EntryInput {
   kind: EntryKind;
   status: EntryStatus;
+  refundOfEntryId: string | null;
   description: string;
   amount: number;
   occurredOn: string;
@@ -247,7 +248,7 @@ export async function downloadProjectCsv(projectId: string, projectName: string)
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;
     const rows = [
-      ["日期", "類型", "品項", "分類", "金額", "狀態", "對象", "付款方式", "備註"],
+      ["日期", "類型", "品項", "分類", "金額", "狀態", "對象", "付款方式", "原始支出", "備註"],
       ...dashboard.entries.map((entry) => [
         entry.occurredOn,
         entry.kind,
@@ -257,6 +258,7 @@ export async function downloadProjectCsv(projectId: string, projectName: string)
         entry.status,
         entry.counterparty,
         entry.paymentMethod,
+        entry.refundOfEntryId ? dashboard.entries.find((item) => item.id === entry.refundOfEntryId)?.description ?? "" : "",
         entry.note,
       ]),
     ];

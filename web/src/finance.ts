@@ -6,6 +6,7 @@ export interface Totals {
   spent: number;
   pending: number;
   returned: number;
+  pendingRefund: number;
   cashBalance: number;
   budgetRemaining: number;
 }
@@ -16,6 +17,7 @@ export function calculateTotals(categories: Category[], entries: LedgerEntry[]):
   let spent = 0;
   let pending = 0;
   let returned = 0;
+  let pendingRefund = 0;
 
   for (const entry of entries) {
     if (entry.status === "void") continue;
@@ -23,12 +25,12 @@ export function calculateTotals(categories: Category[], entries: LedgerEntry[]):
     if (entry.kind === "expense") {
       if (entry.status === "posted") spent += entry.amount;
       if (entry.status === "pending") pending += entry.amount;
-      if (entry.status === "refunded") returned += entry.amount;
     }
     if (entry.kind === "refund" && entry.status === "posted") {
       spent -= entry.amount;
       returned += entry.amount;
     }
+    if (entry.kind === "refund" && entry.status === "pending") pendingRefund += entry.amount;
   }
 
   return {
@@ -37,6 +39,7 @@ export function calculateTotals(categories: Category[], entries: LedgerEntry[]):
     spent,
     pending,
     returned,
+    pendingRefund,
     cashBalance: received - spent,
     budgetRemaining: planned - spent,
   };

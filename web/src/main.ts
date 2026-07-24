@@ -49,12 +49,6 @@ const esc = (value: string) =>
 const dateLabel = (date: string) =>
   new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric" }).format(new Date(`${date}T00:00:00`));
 const kindLabel: Record<EntryKind, string> = { income: "資金入帳", expense: "支出", refund: "退款" };
-const statusLabel: Record<LedgerEntry["status"], string> = {
-  posted: "已入帳",
-  pending: "待付款",
-  refunded: "已退款",
-  void: "已作廢",
-};
 const projectStatusLabel: Record<ProjectStatus, string> = {
   active: "進行中",
   completed: "已完工",
@@ -72,25 +66,43 @@ function categoryName(id: string | null): string {
 }
 
 function isReturned(entry: LedgerEntry): boolean {
-  return entry.kind === "refund" || (entry.kind === "expense" && entry.status === "refunded");
+  return entry.kind === "refund" && entry.status === "posted";
+}
+
+function isRefund(entry: LedgerEntry): boolean {
+  return entry.kind === "refund";
 }
 
 function entryAmountSign(entry: LedgerEntry): string {
-  return entry.kind === "income" || isReturned(entry) ? "+" : "−";
+  return entry.kind === "income" || isRefund(entry) ? "+" : "−";
 }
 
 function entryAmountClass(entry: LedgerEntry): string {
   if (entry.kind === "income") return "income";
   if (isReturned(entry)) return "returned";
+  if (isRefund(entry)) return "refund";
   return "";
 }
 
 function entryStatusText(entry: LedgerEntry): string {
-  return entry.kind === "refund" ? "退款" : statusLabel[entry.status];
+  if (entry.status === "void") return "已作廢";
+  if (entry.kind === "income") return "已入帳";
+  if (entry.kind === "refund") return entry.status === "posted" ? "已退款" : "待退款";
+  return entry.status === "posted" ? "已付款" : "待付款";
 }
 
 function entryStatusClass(entry: LedgerEntry): string {
   return isReturned(entry) ? "refunded" : entry.status;
+}
+
+function originalExpense(entry: LedgerEntry): LedgerEntry | undefined {
+  return entry.refundOfEntryId ? payload?.entries.find((item) => item.id === entry.refundOfEntryId) : undefined;
+}
+
+function refundReserved(sourceId: string, exceptId?: string): number {
+  return payload!.entries
+    .filter((entry) => entry.kind === "refund" && entry.refundOfEntryId === sourceId && entry.id !== exceptId && entry.status !== "void")
+    .reduce((sum, entry) => sum + entry.amount, 0);
 }
 
 function sortIndicator(key: string, currentKey: string, direction: SortDirection): string {
@@ -291,11 +303,15 @@ function renderDashboard() {
   const totals = calculateTotals(payload!.categories, payload!.entries);
   const recent = [...payload!.entries].sort((a, b) => b.occurredOn.localeCompare(a.occurredOn)).slice(0, 5);
   const usage = totals.planned ? Math.min(100, Math.max(0, Math.round(totals.spent / totals.planned * 100))) : 0;
+  const refundSummary = [
+    totals.returned ? `已退回 +${formatMoney(totals.returned)}` : "",
+    totals.pendingRefund ? `待退款 ${formatMoney(totals.pendingRefund)}` : "",
+  ].filter(Boolean).join(" · ") || `待付款 ${formatMoney(totals.pending)}`;
   layout(`
     <section class="hero-grid">
       <article class="balance-card"><div><p>可用資金</p><h3>${formatMoney(totals.cashBalance)}</h3><span>${totals.received ? `已入帳 ${formatMoney(totals.received)}` : "等待第一筆入帳"}</span></div><div class="balance-orb">NT$</div></article>
       <article class="metric-card"><p>預估總預算</p><h3>${formatMoney(totals.planned)}</h3><span>已使用 ${usage}%</span></article>
-      <article class="metric-card"><p>實際支出</p><h3>${formatMoney(totals.spent)}</h3><span class="${totals.returned ? "returned" : "negative"}">${totals.returned ? `已退回 +${formatMoney(totals.returned)}` : `待付款 ${formatMoney(totals.pending)}`}</span></article>
+      <article class="metric-card"><p>實際支出</p><h3>${formatMoney(totals.spent)}</h3><span class="${totals.returned ? "returned" : totals.pendingRefund ? "refund" : "negative"}">${refundSummary}</span></article>
       <article class="metric-card"><p>預算餘額</p><h3>${formatMoney(totals.budgetRemaining)}</h3><span>${totals.budgetRemaining < 0 ? "已超出預算" : "尚可使用"}</span></article>
     </section>
     <section class="content-grid">
@@ -312,7 +328,7 @@ function renderDashboard() {
       <article class="panel recent">
         <div class="panel-head"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>最新紀錄</h3></div><a class="text-button" href="${projectRoute(currentProjectId(), "expenses")}">查看全部</a></div>
         <div class="activity-list">${recent.map((entry) => `
-          <div class="activity"><div class="entry-icon ${isReturned(entry) ? "refund" : entry.kind}">${entry.kind === "income" ? "↓" : isReturned(entry) ? "↩" : "↑"}</div><div><strong>${esc(entry.description)}</strong><small>${dateLabel(entry.occurredOn)} · ${isReturned(entry) ? "已退款" : esc(kindLabel[entry.kind])}</small></div><b class="${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</b></div>`).join("") || '<p class="empty">尚無帳務紀錄</p>'}</div>
+          <div class="activity"><div class="entry-icon ${isRefund(entry) ? "refund" : entry.kind}">${entry.kind === "income" ? "↓" : isRefund(entry) ? "↩" : "↑"}</div><div><strong>${esc(entry.description)}</strong><small>${dateLabel(entry.occurredOn)} · ${esc(entryStatusText(entry))}</small></div><b class="${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</b></div>`).join("") || '<p class="empty">尚無帳務紀錄</p>'}</div>
       </article>
     </section>`, "dashboard");
 }
@@ -357,17 +373,23 @@ function entryFilters(entries: LedgerEntry[]) {
   return entries.filter((entry) =>
     (!query || [entry.description, entry.counterparty, entry.note].join(" ").toLowerCase().includes(query.toLowerCase())) &&
     (!filterCategory || entry.categoryId === filterCategory) &&
-    (!filterStatus || entry.status === filterStatus));
+    (!filterStatus ||
+      (filterStatus === "expense-posted" && entry.kind === "expense" && entry.status === "posted") ||
+      (filterStatus === "expense-pending" && entry.kind === "expense" && entry.status === "pending") ||
+      (filterStatus === "refund-posted" && entry.kind === "refund" && entry.status === "posted") ||
+      (filterStatus === "refund-pending" && entry.kind === "refund" && entry.status === "pending")));
 }
 
 function entryRow(entry: LedgerEntry, isFunding: boolean) {
-  return `<tr><td>${dateLabel(entry.occurredOn)}</td><td><strong>${esc(entry.description)}</strong>${entry.attachments.length ? `<small class="attachment-count">⌁ ${entry.attachments.length} 張憑證</small>` : ""}</td><td>${esc(isFunding ? entry.counterparty : categoryName(entry.categoryId))}</td><td>${esc(entry.paymentMethod || "—")}</td><td><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span></td><td class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</td><td class="row-actions"><button data-action="edit-entry" data-id="${entry.id}">編輯</button><button data-action="delete-entry" data-id="${entry.id}">刪除</button></td></tr>`;
+  const source = originalExpense(entry);
+  return `<tr><td>${dateLabel(entry.occurredOn)}</td><td><strong>${esc(entry.description)}</strong>${source ? `<small class="attachment-count">原支出：${esc(source.description)}</small>` : ""}${entry.attachments.length ? `<small class="attachment-count">⌁ ${entry.attachments.length} 張憑證</small>` : ""}</td><td>${esc(isFunding ? entry.counterparty : categoryName(entry.categoryId))}</td><td>${esc(entry.paymentMethod || "—")}</td><td><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span></td><td class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</td><td class="row-actions"><button data-action="edit-entry" data-id="${entry.id}">編輯</button><button data-action="delete-entry" data-id="${entry.id}">刪除</button></td></tr>`;
 }
 
 function entryCard(entry: LedgerEntry, isFunding: boolean) {
+  const source = originalExpense(entry);
   return `<article class="mobile-record-card">
     <div class="mobile-record-head"><div><small>${dateLabel(entry.occurredOn)}</small><strong>${esc(entry.description)}</strong></div><b class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</b></div>
-    <div class="mobile-entry-meta"><span>${esc(isFunding ? entry.counterparty || "未填來源" : categoryName(entry.categoryId))}</span><span>${esc(entry.paymentMethod || "未指定方式")}</span><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span>${entry.attachments.length ? `<span>⌁ ${entry.attachments.length} 張憑證</span>` : ""}</div>
+    <div class="mobile-entry-meta"><span>${esc(isFunding ? entry.counterparty || "未填來源" : categoryName(entry.categoryId))}</span><span>${esc(entry.paymentMethod || "未指定方式")}</span><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span>${source ? `<span>原支出：${esc(source.description)}</span>` : ""}${entry.attachments.length ? `<span>⌁ ${entry.attachments.length} 張憑證</span>` : ""}</div>
     <div class="mobile-record-actions"><button data-action="edit-entry" data-id="${entry.id}">編輯</button><button class="danger-text" data-action="delete-entry" data-id="${entry.id}">刪除</button></div>
   </article>`;
 }
@@ -388,8 +410,8 @@ function renderEntries(view: "expenses" | "funding") {
       return entrySortDirection === "asc" ? compare : -compare;
     });
   layout(`
-    <section class="page-actions"><p>${isFunding ? "記錄實際收到的匯款，金額會直接增加可用資金。" : "管理已付款、待付款、退款與工程憑證。"}</p><button class="primary" data-action="new-entry" data-kind="${isFunding ? "income" : "expense"}">＋ 新增${isFunding ? "入帳" : "支出"}</button></section>
-    <section class="filters panel"><label>搜尋<input id="search" placeholder="品項、對象或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<label>分類<select id="category-filter"><option value="">全部分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${filterCategory === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}</select></label><label>狀態<select id="status-filter"><option value="">全部狀態</option><option value="posted" ${filterStatus === "posted" ? "selected" : ""}>已付款</option><option value="pending" ${filterStatus === "pending" ? "selected" : ""}>待付款</option><option value="refunded" ${filterStatus === "refunded" ? "selected" : ""}>已退款</option><option value="void" ${filterStatus === "void" ? "selected" : ""}>已作廢</option></select></label>`}</section>
+    <section class="page-actions"><p>${isFunding ? "記錄實際收到的匯款，金額會直接增加可用資金。" : "管理已付款、待付款、退款與工程憑證。"}</p><div class="entry-action-buttons">${isFunding ? "" : '<button class="secondary" data-action="new-entry" data-kind="refund">↩ 新增退貨</button>'}<button class="primary" data-action="new-entry" data-kind="${isFunding ? "income" : "expense"}">＋ 新增${isFunding ? "入帳" : "支出"}</button></div></section>
+    <section class="filters panel"><label>搜尋<input id="search" placeholder="品項、對象或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<label>分類<select id="category-filter"><option value="">全部分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${filterCategory === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}</select></label><label>狀態<select id="status-filter"><option value="">全部狀態</option><option value="expense-posted" ${filterStatus === "expense-posted" ? "selected" : ""}>已付款</option><option value="expense-pending" ${filterStatus === "expense-pending" ? "selected" : ""}>待付款</option><option value="refund-posted" ${filterStatus === "refund-posted" ? "selected" : ""}>已退款</option><option value="refund-pending" ${filterStatus === "refund-pending" ? "selected" : ""}>待退款</option></select></label>`}</section>
     <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="entry-table"><thead><tr><th><button class="sort-button" data-sort-entry="occurredOn">日期 ${sortIndicator("occurredOn", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="description">品項 ${sortIndicator("description", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="category">${isFunding ? "來源" : "分類"} ${sortIndicator("category", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="paymentMethod">付款方式 ${sortIndicator("paymentMethod", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="status">狀態 ${sortIndicator("status", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="amount">金額 ${sortIndicator("amount", entrySortKey, entrySortDirection)}</button></th><th></th></tr></thead><tbody>${entries.map((entry) => entryRow(entry, isFunding)).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的紀錄。</td></tr>'}</tbody></table></div></section>
     <section class="mobile-record-list">${entries.map((entry) => entryCard(entry, isFunding)).join("") || '<div class="panel empty">目前沒有符合條件的紀錄。</div>'}</section>`, view);
   document.querySelector<HTMLInputElement>("#search")?.addEventListener("change", (event) => {
@@ -499,6 +521,12 @@ function openCategoryModal(existing?: Category) {
 function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expense") {
   const kind = existing?.kind ?? defaultKind;
   const categoryOptions = `<option value="">不指定分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${(existing?.categoryId ?? "") === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}`;
+  const refundSources = payload!.entries.filter((entry) =>
+    entry.kind === "expense" && entry.status === "posted" && (entry.id === existing?.refundOfEntryId || refundReserved(entry.id, existing?.id) < entry.amount));
+  const refundSourceOptions = `<option value="">選擇已付款的原始支出</option>${refundSources.map((entry) => {
+    const remaining = entry.amount - refundReserved(entry.id, existing?.id);
+    return `<option value="${entry.id}" ${entry.id === existing?.refundOfEntryId ? "selected" : ""}>${esc(entry.description)}（可退 ${formatMoney(remaining)}）</option>`;
+  }).join("")}`;
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${kindLabel[kind]}</p><h3>${existing ? "編輯紀錄" : `新增${kindLabel[kind]}`}</h3></div><button class="icon-button" data-action="close-modal">×</button></div>
     <form id="entry-form" class="form-grid">
@@ -506,18 +534,62 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       <label>品項／用途<input name="description" maxlength="80" required value="${esc(existing?.description ?? "")}" placeholder="例如：一樓配電材料" /></label>
       <label>金額<input name="amount" type="number" min="1" step="1" required value="${existing?.amount ?? ""}" /></label>
       <label>日期<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
+      <label class="full refund-source-field">原始支出<select name="refundOfEntryId">${refundSourceOptions}</select></label>
       <label>預算分類<select name="categoryId">${categoryOptions}</select></label>
       <label>對象<input name="counterparty" maxlength="60" value="${esc(existing?.counterparty ?? "")}" placeholder="廠商或匯款人" /></label>
       <label>付款方式<select name="paymentMethod"><option value="">未指定</option>${["銀行轉帳", "現金", "信用卡", "電子支付"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
-      <label>狀態<select name="status"><option value="posted" ${existing?.status === "posted" || !existing ? "selected" : ""}>已入帳／已付款</option><option value="pending" ${existing?.status === "pending" ? "selected" : ""}>待付款</option><option value="refunded" ${existing?.status === "refunded" ? "selected" : ""}>已退款</option><option value="void" ${existing?.status === "void" ? "selected" : ""}>已作廢</option></select></label>
-      <p class="form-hint full">將「支出」標記為已退款後，這筆金額會自動退回可用資金與預算餘額。</p>
+      <label>狀態<select name="status"></select></label>
+      <p class="form-hint full"></p>
       <label class="full">備註<textarea name="note" maxlength="500" placeholder="保固、報價或付款說明">${esc(existing?.note ?? "")}</textarea></label>
       <label class="full upload-field">憑證照片（JPG、PNG、WebP；最多 5 張，每張 10MB）<input name="files" type="file" accept="image/jpeg,image/png,image/webp" multiple /></label>
       <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存紀錄</button></div>
     </form>`);
-  document.querySelector<HTMLFormElement>("#entry-form")!.addEventListener("submit", async (event) => {
+  const formElement = document.querySelector<HTMLFormElement>("#entry-form")!;
+  const kindInput = formElement.elements.namedItem("kind") as HTMLSelectElement;
+  const statusInput = formElement.elements.namedItem("status") as HTMLSelectElement;
+  const sourceInput = formElement.elements.namedItem("refundOfEntryId") as HTMLSelectElement;
+  const categoryInput = formElement.elements.namedItem("categoryId") as HTMLSelectElement;
+  const amountInput = formElement.elements.namedItem("amount") as HTMLInputElement;
+  const descriptionInput = formElement.elements.namedItem("description") as HTMLInputElement;
+  const counterpartyInput = formElement.elements.namedItem("counterparty") as HTMLInputElement;
+  const paymentInput = formElement.elements.namedItem("paymentMethod") as HTMLSelectElement;
+  const sourceField = formElement.querySelector<HTMLElement>(".refund-source-field")!;
+  const hint = formElement.querySelector<HTMLElement>(".form-hint")!;
+  const statusOptions = (selected: string) => kindInput.value === "income"
+    ? `<option value="posted" selected>已入帳</option>`
+    : kindInput.value === "refund"
+      ? `<option value="posted" ${selected === "posted" ? "selected" : ""}>已退款</option><option value="pending" ${selected === "pending" ? "selected" : ""}>待退款</option>`
+      : `<option value="posted" ${selected === "posted" ? "selected" : ""}>已付款</option><option value="pending" ${selected === "pending" ? "selected" : ""}>待付款</option>`;
+  const applySource = () => {
+    const source = payload!.entries.find((entry) => entry.id === sourceInput.value);
+    if (!source) return;
+    descriptionInput.value = `退貨：${source.description}`;
+    categoryInput.value = source.categoryId ?? "";
+    counterpartyInput.value = source.counterparty;
+    paymentInput.value = source.paymentMethod;
+    amountInput.max = String(source.amount - refundReserved(source.id, existing?.id));
+  };
+  const sync = () => {
+    const selected = statusInput.value || (existing?.status === "pending" ? "pending" : "posted");
+    statusInput.innerHTML = statusOptions(selected);
+    const isRefundKind = kindInput.value === "refund";
+    sourceField.hidden = !isRefundKind;
+    sourceInput.disabled = !isRefundKind;
+    sourceInput.required = isRefundKind;
+    categoryInput.disabled = isRefundKind;
+    hint.textContent = isRefundKind
+      ? "退款必須連結原始已付款支出；只有選擇「已退款」後，金額才會加回可用資金與預算餘額。"
+      : kindInput.value === "income"
+        ? "已入帳的資金會直接增加可用資金。"
+        : "支出只可記錄已付款或待付款；退貨請另建一筆退款紀錄。";
+    if (isRefundKind && sourceInput.value) applySource();
+    if (!isRefundKind) amountInput.removeAttribute("max");
+  };
+  kindInput.addEventListener("change", sync);
+  sourceInput.addEventListener("change", applySource);
+  sync();
+  formElement.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const formElement = event.currentTarget as HTMLFormElement;
     const form = new FormData(formElement);
     const files = [...(formElement.querySelector<HTMLInputElement>("[name='files']")?.files ?? [])];
     if (files.length + (existing?.attachments.length ?? 0) > 5 ||
@@ -529,6 +601,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       const result = await saveEntry(projectId, {
         kind: String(form.get("kind")) as EntryKind,
         status: String(form.get("status")) as LedgerEntry["status"],
+        refundOfEntryId: String(form.get("refundOfEntryId")) || null,
         description: String(form.get("description")).trim(),
         amount: Number(form.get("amount")),
         occurredOn: String(form.get("occurredOn")),
