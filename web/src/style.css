@@ -1,5 +1,6 @@
 :root { font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif; color: #24302e; background: #f6f4ef; font-synthesis: none; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; min-width: 320px; background: #f6f4ef; }
 a { color: inherit; }
 button, input, select, textarea { font: inherit; }

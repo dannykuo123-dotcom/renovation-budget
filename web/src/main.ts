@@ -601,7 +601,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       const result = await saveEntry(projectId, {
         kind: String(form.get("kind")) as EntryKind,
         status: String(form.get("status")) as LedgerEntry["status"],
-        refundOfEntryId: String(form.get("refundOfEntryId")) || null,
+        refundOfEntryId: form.get("refundOfEntryId")?.toString() || null,
         description: String(form.get("description")).trim(),
         amount: Number(form.get("amount")),
         occurredOn: String(form.get("occurredOn")),
