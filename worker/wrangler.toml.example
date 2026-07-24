@@ -1,0 +1,16 @@
+name = "renovation-budget-api"
+main = "src/index.ts"
+compatibility_date = "2026-07-24"
+
+[vars]
+ALLOWED_ORIGIN = "https://YOUR_GITHUB_USER.github.io/YOUR_REPOSITORY"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "renovation-budget"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "RECEIPTS"
+bucket_name = "renovation-budget-receipts"

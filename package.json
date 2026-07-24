@@ -1,0 +1,12 @@
+{
+  "name": "renovation-budget",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["web", "worker"],
+  "scripts": {
+    "build": "npm run build --workspace web && npm run check --workspace worker",
+    "test": "npm run test --workspace web",
+    "dev": "npm run dev --workspace web"
+  },
+  "engines": { "node": ">=22" }
+}

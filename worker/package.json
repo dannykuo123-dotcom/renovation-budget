@@ -1,0 +1,16 @@
+{
+  "name": "renovation-budget-worker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --config wrangler.toml",
+    "deploy": "wrangler deploy --config wrangler.toml",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250718.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.25.0"
+  }
+}

@@ -1,0 +1,83 @@
+name: Test and deploy renovation budget
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build --workspace web
+
+  deploy-worker:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+      CLOUDFLARE_R2_BUCKET_NAME: ${{ secrets.CLOUDFLARE_R2_BUCKET_NAME }}
+      PAGES_ALLOWED_ORIGIN: ${{ vars.PAGES_ALLOWED_ORIGIN }}
+      BUDGET_ACCESS_CODE: ${{ secrets.BUDGET_ACCESS_CODE }}
+      SESSION_SIGNING_SECRET: ${{ secrets.SESSION_SIGNING_SECRET }}
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Generate Worker binding configuration
+        run: node ../scripts/write-wrangler-config.mjs
+      - name: Set Worker secrets
+        run: |
+          printf '%s' "$BUDGET_ACCESS_CODE" | npx wrangler secret put BUDGET_ACCESS_CODE
+          printf '%s' "$SESSION_SIGNING_SECRET" | npx wrangler secret put SESSION_SIGNING_SECRET
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply renovation-budget --remote
+      - name: Deploy Worker
+        run: npx wrangler deploy
+
+  deploy-pages:
+    if: github.event_name != 'pull_request'
+    needs: [test, deploy-worker]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace web
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
