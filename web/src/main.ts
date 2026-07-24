@@ -34,6 +34,13 @@ let query = "";
 let filterCategory = "";
 let filterStatus = "";
 let loading = false;
+type SortDirection = "asc" | "desc";
+type BudgetSortKey = "sortOrder" | "name" | "planned" | "spent" | "remaining" | "percentage";
+type EntrySortKey = "occurredOn" | "description" | "category" | "paymentMethod" | "status" | "amount";
+let budgetSortKey: BudgetSortKey = "sortOrder";
+let budgetSortDirection: SortDirection = "asc";
+let entrySortKey: EntrySortKey = "occurredOn";
+let entrySortDirection: SortDirection = "desc";
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 const esc = (value: string) =>
@@ -62,6 +69,36 @@ function currentProjectId(): string {
 
 function categoryName(id: string | null): string {
   return payload?.categories.find((category) => category.id === id)?.name ?? "未分類";
+}
+
+function isReturned(entry: LedgerEntry): boolean {
+  return entry.kind === "refund" || (entry.kind === "expense" && entry.status === "refunded");
+}
+
+function entryAmountSign(entry: LedgerEntry): string {
+  return entry.kind === "income" || isReturned(entry) ? "+" : "−";
+}
+
+function entryAmountClass(entry: LedgerEntry): string {
+  if (entry.kind === "income") return "income";
+  if (isReturned(entry)) return "returned";
+  return "";
+}
+
+function entryStatusText(entry: LedgerEntry): string {
+  return entry.kind === "refund" ? "退款" : statusLabel[entry.status];
+}
+
+function entryStatusClass(entry: LedgerEntry): string {
+  return isReturned(entry) ? "refunded" : entry.status;
+}
+
+function sortIndicator(key: string, currentKey: string, direction: SortDirection): string {
+  return key === currentKey ? (direction === "asc" ? "↑" : "↓") : "↕";
+}
+
+function compareSortValue(left: string | number, right: string | number): number {
+  return typeof left === "string" ? left.localeCompare(String(right), "zh-Hant") : left - Number(right);
 }
 
 function toast(message: string, tone = "success") {
@@ -258,7 +295,7 @@ function renderDashboard() {
     <section class="hero-grid">
       <article class="balance-card"><div><p>可用資金</p><h3>${formatMoney(totals.cashBalance)}</h3><span>${totals.received ? `已入帳 ${formatMoney(totals.received)}` : "等待第一筆入帳"}</span></div><div class="balance-orb">NT$</div></article>
       <article class="metric-card"><p>預估總預算</p><h3>${formatMoney(totals.planned)}</h3><span>已使用 ${usage}%</span></article>
-      <article class="metric-card"><p>實際支出</p><h3>${formatMoney(totals.spent)}</h3><span class="negative">待付款 ${formatMoney(totals.pending)}</span></article>
+      <article class="metric-card"><p>實際支出</p><h3>${formatMoney(totals.spent)}</h3><span class="${totals.returned ? "returned" : "negative"}">${totals.returned ? `已退回 +${formatMoney(totals.returned)}` : `待付款 ${formatMoney(totals.pending)}`}</span></article>
       <article class="metric-card"><p>預算餘額</p><h3>${formatMoney(totals.budgetRemaining)}</h3><span>${totals.budgetRemaining < 0 ? "已超出預算" : "尚可使用"}</span></article>
     </section>
     <section class="content-grid">
@@ -275,7 +312,7 @@ function renderDashboard() {
       <article class="panel recent">
         <div class="panel-head"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>最新紀錄</h3></div><a class="text-button" href="${projectRoute(currentProjectId(), "expenses")}">查看全部</a></div>
         <div class="activity-list">${recent.map((entry) => `
-          <div class="activity"><div class="entry-icon ${entry.kind}">${entry.kind === "income" ? "↓" : entry.kind === "refund" ? "↩" : "↑"}</div><div><strong>${esc(entry.description)}</strong><small>${dateLabel(entry.occurredOn)} · ${esc(kindLabel[entry.kind])}</small></div><b class="${entry.kind === "income" ? "income" : ""}">${entry.kind === "income" ? "+" : "−"}${formatMoney(entry.amount)}</b></div>`).join("") || '<p class="empty">尚無帳務紀錄</p>'}</div>
+          <div class="activity"><div class="entry-icon ${isReturned(entry) ? "refund" : entry.kind}">${entry.kind === "income" ? "↓" : isReturned(entry) ? "↩" : "↑"}</div><div><strong>${esc(entry.description)}</strong><small>${dateLabel(entry.occurredOn)} · ${isReturned(entry) ? "已退款" : esc(kindLabel[entry.kind])}</small></div><b class="${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</b></div>`).join("") || '<p class="empty">尚無帳務紀錄</p>'}</div>
       </article>
     </section>`, "dashboard");
 }
@@ -285,10 +322,21 @@ function renderBudget() {
     const spent = categorySpent(category.id, payload!.entries);
     const percentage = category.plannedAmount ? Math.round(spent / category.plannedAmount * 100) : 0;
     return { category, spent, percentage };
+  }).sort((left, right) => {
+    const value = (row: typeof left): string | number => {
+      if (budgetSortKey === "sortOrder") return row.category.sortOrder;
+      if (budgetSortKey === "name") return row.category.name;
+      if (budgetSortKey === "planned") return row.category.plannedAmount;
+      if (budgetSortKey === "spent") return row.spent;
+      if (budgetSortKey === "remaining") return row.category.plannedAmount - row.spent;
+      return row.percentage;
+    };
+    const compare = compareSortValue(value(left), value(right));
+    return budgetSortDirection === "asc" ? compare : -compare;
   });
   layout(`
     <section class="page-actions"><p>規劃各類工程的預估支出，並自動比對實際金額。</p><button class="primary" data-action="new-category">＋ 新增分類</button></section>
-    <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>分類</th><th>預估預算</th><th>實際支出</th><th>剩餘</th><th>使用率</th><th></th></tr></thead><tbody>
+    <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th><button class="sort-button" data-sort-budget="name">分類 ${sortIndicator("name", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="planned">預估預算 ${sortIndicator("planned", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="spent">實際支出 ${sortIndicator("spent", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="remaining">剩餘 ${sortIndicator("remaining", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="percentage">使用率 ${sortIndicator("percentage", budgetSortKey, budgetSortDirection)}</button></th><th></th></tr></thead><tbody>
       ${rows.map(({ category, spent, percentage }) => `<tr><td><span class="color-dot" style="background:${category.color}"></span>${esc(category.name)}</td><td>${formatMoney(category.plannedAmount)}</td><td>${formatMoney(spent)}</td><td class="${category.plannedAmount - spent < 0 ? "negative" : ""}">${formatMoney(category.plannedAmount - spent)}</td><td><div class="percentage"><i style="width:${Math.min(100, Math.max(0, percentage))}%;background:${category.color}"></i><span>${percentage}%</span></div></td><td class="row-actions"><button data-action="edit-category" data-id="${category.id}">編輯</button><button data-action="delete-category" data-id="${category.id}">刪除</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">還沒有分類，先新增一個預算分類吧。</td></tr>'}
     </tbody></table></div></section>
     <section class="mobile-record-list">${rows.map(({ category, spent, percentage }) => `
@@ -297,6 +345,12 @@ function renderBudget() {
         <div class="mobile-record-grid"><div><small>預估</small><b>${formatMoney(category.plannedAmount)}</b></div><div><small>已支出</small><b>${formatMoney(spent)}</b></div><div><small>剩餘</small><b class="${category.plannedAmount - spent < 0 ? "negative" : ""}">${formatMoney(category.plannedAmount - spent)}</b></div></div>
         <div class="mobile-record-actions"><button data-action="edit-category" data-id="${category.id}">編輯</button><button class="danger-text" data-action="delete-category" data-id="${category.id}">刪除</button></div>
       </article>`).join("") || '<div class="panel empty">還沒有分類，先新增一個預算分類吧。</div>'}</section>`, "budget");
+  document.querySelectorAll<HTMLElement>("[data-sort-budget]").forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.sortBudget as BudgetSortKey;
+    budgetSortDirection = key === budgetSortKey && budgetSortDirection === "asc" ? "desc" : "asc";
+    budgetSortKey = key;
+    renderBudget();
+  }));
 }
 
 function entryFilters(entries: LedgerEntry[]) {
@@ -307,13 +361,13 @@ function entryFilters(entries: LedgerEntry[]) {
 }
 
 function entryRow(entry: LedgerEntry, isFunding: boolean) {
-  return `<tr><td>${dateLabel(entry.occurredOn)}</td><td><strong>${esc(entry.description)}</strong>${entry.attachments.length ? `<small class="attachment-count">⌁ ${entry.attachments.length} 張憑證</small>` : ""}</td><td>${esc(isFunding ? entry.counterparty : categoryName(entry.categoryId))}</td><td>${esc(entry.paymentMethod || "—")}</td><td><span class="status ${entry.status}">${entry.kind === "refund" ? "退款" : statusLabel[entry.status]}</span></td><td class="amount ${entry.kind === "income" ? "income" : entry.kind === "refund" ? "refund" : ""}">${entry.kind === "income" ? "+" : "−"}${formatMoney(entry.amount)}</td><td class="row-actions"><button data-action="edit-entry" data-id="${entry.id}">編輯</button><button data-action="delete-entry" data-id="${entry.id}">刪除</button></td></tr>`;
+  return `<tr><td>${dateLabel(entry.occurredOn)}</td><td><strong>${esc(entry.description)}</strong>${entry.attachments.length ? `<small class="attachment-count">⌁ ${entry.attachments.length} 張憑證</small>` : ""}</td><td>${esc(isFunding ? entry.counterparty : categoryName(entry.categoryId))}</td><td>${esc(entry.paymentMethod || "—")}</td><td><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span></td><td class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</td><td class="row-actions"><button data-action="edit-entry" data-id="${entry.id}">編輯</button><button data-action="delete-entry" data-id="${entry.id}">刪除</button></td></tr>`;
 }
 
 function entryCard(entry: LedgerEntry, isFunding: boolean) {
   return `<article class="mobile-record-card">
-    <div class="mobile-record-head"><div><small>${dateLabel(entry.occurredOn)}</small><strong>${esc(entry.description)}</strong></div><b class="amount ${entry.kind === "income" ? "income" : entry.kind === "refund" ? "refund" : ""}">${entry.kind === "income" ? "+" : "−"}${formatMoney(entry.amount)}</b></div>
-    <div class="mobile-entry-meta"><span>${esc(isFunding ? entry.counterparty || "未填來源" : categoryName(entry.categoryId))}</span><span>${esc(entry.paymentMethod || "未指定方式")}</span><span class="status ${entry.status}">${entry.kind === "refund" ? "退款" : statusLabel[entry.status]}</span>${entry.attachments.length ? `<span>⌁ ${entry.attachments.length} 張憑證</span>` : ""}</div>
+    <div class="mobile-record-head"><div><small>${dateLabel(entry.occurredOn)}</small><strong>${esc(entry.description)}</strong></div><b class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</b></div>
+    <div class="mobile-entry-meta"><span>${esc(isFunding ? entry.counterparty || "未填來源" : categoryName(entry.categoryId))}</span><span>${esc(entry.paymentMethod || "未指定方式")}</span><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span>${entry.attachments.length ? `<span>⌁ ${entry.attachments.length} 張憑證</span>` : ""}</div>
     <div class="mobile-record-actions"><button data-action="edit-entry" data-id="${entry.id}">編輯</button><button class="danger-text" data-action="delete-entry" data-id="${entry.id}">刪除</button></div>
   </article>`;
 }
@@ -321,11 +375,22 @@ function entryCard(entry: LedgerEntry, isFunding: boolean) {
 function renderEntries(view: "expenses" | "funding") {
   const isFunding = view === "funding";
   const entries = entryFilters(payload!.entries.filter((entry) => isFunding ? entry.kind === "income" : entry.kind !== "income"))
-    .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn));
+    .sort((left, right) => {
+      const value = (entry: LedgerEntry): string | number => {
+        if (entrySortKey === "occurredOn") return entry.occurredOn;
+        if (entrySortKey === "description") return entry.description;
+        if (entrySortKey === "category") return isFunding ? entry.counterparty : categoryName(entry.categoryId);
+        if (entrySortKey === "paymentMethod") return entry.paymentMethod;
+        if (entrySortKey === "status") return entryStatusText(entry);
+        return entry.amount;
+      };
+      const compare = compareSortValue(value(left), value(right));
+      return entrySortDirection === "asc" ? compare : -compare;
+    });
   layout(`
     <section class="page-actions"><p>${isFunding ? "記錄實際收到的匯款，金額會直接增加可用資金。" : "管理已付款、待付款、退款與工程憑證。"}</p><button class="primary" data-action="new-entry" data-kind="${isFunding ? "income" : "expense"}">＋ 新增${isFunding ? "入帳" : "支出"}</button></section>
     <section class="filters panel"><label>搜尋<input id="search" placeholder="品項、對象或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<label>分類<select id="category-filter"><option value="">全部分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${filterCategory === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}</select></label><label>狀態<select id="status-filter"><option value="">全部狀態</option><option value="posted" ${filterStatus === "posted" ? "selected" : ""}>已付款</option><option value="pending" ${filterStatus === "pending" ? "selected" : ""}>待付款</option><option value="refunded" ${filterStatus === "refunded" ? "selected" : ""}>已退款</option><option value="void" ${filterStatus === "void" ? "selected" : ""}>已作廢</option></select></label>`}</section>
-    <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="entry-table"><thead><tr><th>日期</th><th>品項</th><th>${isFunding ? "來源" : "分類"}</th><th>付款方式</th><th>狀態</th><th>金額</th><th></th></tr></thead><tbody>${entries.map((entry) => entryRow(entry, isFunding)).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的紀錄。</td></tr>'}</tbody></table></div></section>
+    <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="entry-table"><thead><tr><th><button class="sort-button" data-sort-entry="occurredOn">日期 ${sortIndicator("occurredOn", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="description">品項 ${sortIndicator("description", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="category">${isFunding ? "來源" : "分類"} ${sortIndicator("category", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="paymentMethod">付款方式 ${sortIndicator("paymentMethod", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="status">狀態 ${sortIndicator("status", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="amount">金額 ${sortIndicator("amount", entrySortKey, entrySortDirection)}</button></th><th></th></tr></thead><tbody>${entries.map((entry) => entryRow(entry, isFunding)).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的紀錄。</td></tr>'}</tbody></table></div></section>
     <section class="mobile-record-list">${entries.map((entry) => entryCard(entry, isFunding)).join("") || '<div class="panel empty">目前沒有符合條件的紀錄。</div>'}</section>`, view);
   document.querySelector<HTMLInputElement>("#search")?.addEventListener("change", (event) => {
     query = (event.target as HTMLInputElement).value;
@@ -339,6 +404,12 @@ function renderEntries(view: "expenses" | "funding") {
     filterStatus = (event.target as HTMLSelectElement).value;
     renderProjectPage(view);
   });
+  document.querySelectorAll<HTMLElement>("[data-sort-entry]").forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.sortEntry as EntrySortKey;
+    entrySortDirection = key === entrySortKey && entrySortDirection === "asc" ? "desc" : "asc";
+    entrySortKey = key;
+    renderEntries(view);
+  }));
 }
 
 function renderSettings() {
