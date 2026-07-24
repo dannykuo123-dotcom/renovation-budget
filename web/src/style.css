@@ -119,8 +119,11 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
   .metric-card span { margin-top: 11px; }
   .content-grid { gap: 11px; margin-top: 11px; }
   .panel { padding: 18px; }
-  .page-actions { align-items: flex-start; flex-direction: column; }
-  .page-actions .primary { width: 100%; min-height: 46px; }
+  .page-actions { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .page-actions p, .entry-action-buttons { width: 100%; }
+  .entry-action-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .entry-action-buttons .primary, .entry-action-buttons .secondary { width: 100%; min-height: 46px; }
+  .entry-action-buttons > :only-child { grid-column: 1 / -1; }
   .filters { grid-template-columns: 1fr; gap: 9px; }
   .desktop-table { display: none; }
   .mobile-record-list { display: grid; gap: 11px; }
