@@ -7,7 +7,7 @@ export interface Env {
 }
 
 type EntryKind = "income" | "expense" | "refund";
-type EntryStatus = "posted" | "pending" | "void";
+type EntryStatus = "posted" | "pending" | "refunded" | "void";
 type ProjectStatus = "active" | "completed" | "archived";
 type EntryInput = {
   kind: EntryKind;
@@ -129,7 +129,7 @@ function parseEntry(input: Record<string, unknown>): EntryInput {
   const occurredOn = text(input.occurredOn, 10);
   if (
     !["income", "expense", "refund"].includes(String(kind)) ||
-    !["posted", "pending", "void"].includes(String(status)) ||
+    !["posted", "pending", "refunded", "void"].includes(String(status)) ||
     !amount ||
     !/^\d{4}-\d{2}-\d{2}$/.test(occurredOn)
   ) {
@@ -137,6 +137,7 @@ function parseEntry(input: Record<string, unknown>): EntryInput {
   }
   const description = text(input.description, 80);
   if (!description) throw new Error("請輸入品項或用途");
+  if (status === "refunded" && kind !== "expense") throw new Error("只有支出紀錄可標記為已退款");
   return {
     kind: kind as EntryKind,
     status: status as EntryStatus,

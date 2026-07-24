@@ -45,6 +45,7 @@ const kindLabel: Record<EntryKind, string> = { income: "資金入帳", expense: 
 const statusLabel: Record<LedgerEntry["status"], string> = {
   posted: "已入帳",
   pending: "待付款",
+  refunded: "已退款",
   void: "已作廢",
 };
 const projectStatusLabel: Record<ProjectStatus, string> = {
@@ -323,7 +324,7 @@ function renderEntries(view: "expenses" | "funding") {
     .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn));
   layout(`
     <section class="page-actions"><p>${isFunding ? "記錄實際收到的匯款，金額會直接增加可用資金。" : "管理已付款、待付款、退款與工程憑證。"}</p><button class="primary" data-action="new-entry" data-kind="${isFunding ? "income" : "expense"}">＋ 新增${isFunding ? "入帳" : "支出"}</button></section>
-    <section class="filters panel"><label>搜尋<input id="search" placeholder="品項、對象或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<label>分類<select id="category-filter"><option value="">全部分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${filterCategory === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}</select></label><label>狀態<select id="status-filter"><option value="">全部狀態</option><option value="posted" ${filterStatus === "posted" ? "selected" : ""}>已付款</option><option value="pending" ${filterStatus === "pending" ? "selected" : ""}>待付款</option><option value="void" ${filterStatus === "void" ? "selected" : ""}>已作廢</option></select></label>`}</section>
+    <section class="filters panel"><label>搜尋<input id="search" placeholder="品項、對象或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<label>分類<select id="category-filter"><option value="">全部分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${filterCategory === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}</select></label><label>狀態<select id="status-filter"><option value="">全部狀態</option><option value="posted" ${filterStatus === "posted" ? "selected" : ""}>已付款</option><option value="pending" ${filterStatus === "pending" ? "selected" : ""}>待付款</option><option value="refunded" ${filterStatus === "refunded" ? "selected" : ""}>已退款</option><option value="void" ${filterStatus === "void" ? "selected" : ""}>已作廢</option></select></label>`}</section>
     <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="entry-table"><thead><tr><th>日期</th><th>品項</th><th>${isFunding ? "來源" : "分類"}</th><th>付款方式</th><th>狀態</th><th>金額</th><th></th></tr></thead><tbody>${entries.map((entry) => entryRow(entry, isFunding)).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的紀錄。</td></tr>'}</tbody></table></div></section>
     <section class="mobile-record-list">${entries.map((entry) => entryCard(entry, isFunding)).join("") || '<div class="panel empty">目前沒有符合條件的紀錄。</div>'}</section>`, view);
   document.querySelector<HTMLInputElement>("#search")?.addEventListener("change", (event) => {
@@ -437,7 +438,8 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       <label>預算分類<select name="categoryId">${categoryOptions}</select></label>
       <label>對象<input name="counterparty" maxlength="60" value="${esc(existing?.counterparty ?? "")}" placeholder="廠商或匯款人" /></label>
       <label>付款方式<select name="paymentMethod"><option value="">未指定</option>${["銀行轉帳", "現金", "信用卡", "電子支付"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
-      <label>狀態<select name="status"><option value="posted" ${existing?.status === "posted" || !existing ? "selected" : ""}>已入帳／已付款</option><option value="pending" ${existing?.status === "pending" ? "selected" : ""}>待付款</option><option value="void" ${existing?.status === "void" ? "selected" : ""}>已作廢</option></select></label>
+      <label>狀態<select name="status"><option value="posted" ${existing?.status === "posted" || !existing ? "selected" : ""}>已入帳／已付款</option><option value="pending" ${existing?.status === "pending" ? "selected" : ""}>待付款</option><option value="refunded" ${existing?.status === "refunded" ? "selected" : ""}>已退款</option><option value="void" ${existing?.status === "void" ? "selected" : ""}>已作廢</option></select></label>
+      <p class="form-hint full">將「支出」標記為已退款後，這筆金額會自動退回可用資金與預算餘額。</p>
       <label class="full">備註<textarea name="note" maxlength="500" placeholder="保固、報價或付款說明">${esc(existing?.note ?? "")}</textarea></label>
       <label class="full upload-field">憑證照片（JPG、PNG、WebP；最多 5 張，每張 10MB）<input name="files" type="file" accept="image/jpeg,image/png,image/webp" multiple /></label>
       <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存紀錄</button></div>
