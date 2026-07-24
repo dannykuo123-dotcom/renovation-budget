@@ -68,6 +68,14 @@ export async function loadDashboard(): Promise<DashboardPayload> {
   return request<DashboardPayload>("/api/dashboard");
 }
 
+export async function saveProjectName(name: string): Promise<DashboardPayload["project"]> {
+  if (isDemoMode) {
+    demoState.project = { ...demoState.project, name, updatedAt: now() };
+    return clone(demoState.project);
+  }
+  return request<DashboardPayload["project"]>("/api/project", { method: "PATCH", body: JSON.stringify({ name }) });
+}
+
 export async function saveCategory(input: Omit<Category, "id" | "sortOrder">, id?: string): Promise<Category> {
   if (isDemoMode) {
     if (id) {

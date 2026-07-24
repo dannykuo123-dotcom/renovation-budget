@@ -158,6 +158,17 @@ async function dashboard(env: Env): Promise<Response> {
 
 async function touchProject(env: Env): Promise<void> { await env.DB.prepare("UPDATE project_settings SET updated_at = ? WHERE id = 'default'").bind(now()).run(); }
 
+async function projectSettings(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "PATCH") return json({ error: "不支援的方法" }, { status: 405 });
+  await seedProject(env);
+  const body = await requireJson(request);
+  const name = text(body.name, 60);
+  if (!name) return json({ error: "請輸入專案名稱" }, { status: 400 });
+  const updatedAt = now();
+  await env.DB.prepare("UPDATE project_settings SET name = ?, updated_at = ? WHERE id = 'default'").bind(name, updatedAt).run();
+  return json({ name, currency: "TWD", updatedAt });
+}
+
 async function categories(request: Request, env: Env, url: URL): Promise<Response> {
   const idPart = url.pathname.match(/^\/api\/categories\/([^/]+)$/)?.[1];
   if (!idPart && request.method === "GET") {
@@ -250,6 +261,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
   if (!await hasSession(request, env)) return json({ error: "請先輸入存取碼" }, { status: 401 });
   if (url.pathname === "/api/auth/logout" && request.method === "POST") return new Response(null, { status: 204 });
   if (url.pathname === "/api/dashboard" && request.method === "GET") return dashboard(env);
+  if (url.pathname === "/api/project") return projectSettings(request, env);
   if (url.pathname.startsWith("/api/categories")) return categories(request, env, url);
   if (url.pathname.startsWith("/api/entries")) {
     if (url.pathname.includes("/attachments")) return attachmentRoutes(request, env, url);

@@ -1,6 +1,6 @@
 import "./style.css";
 import { calculateTotals, categorySpent, formatMoney } from "./finance";
-import { clearDemo, deleteCategory, deleteEntry, exportUrl, isDemoMode, loadDashboard, login, saveCategory, saveEntry, session, uploadAttachments } from "./api";
+import { clearDemo, deleteCategory, deleteEntry, exportUrl, isDemoMode, loadDashboard, login, saveCategory, saveEntry, saveProjectName, session, uploadAttachments } from "./api";
 import type { Category, DashboardPayload, EntryKind, LedgerEntry } from "./types";
 
 type View = "dashboard" | "budget" | "expenses" | "funding" | "settings";
@@ -82,7 +82,7 @@ function renderExpenses(kind: "expenses" | "funding") {
 }
 
 function renderSettings() {
-  layout(`<section class="settings-grid"><article class="panel setting-card"><p class="eyebrow">PROJECT</p><h3>${esc(payload!.project.name)}</h3><p class="muted">新臺幣（TWD） · 最後更新 ${new Intl.DateTimeFormat("zh-TW", { dateStyle: "medium", timeStyle: "short" }).format(new Date(payload!.project.updatedAt))}</p></article><article class="panel setting-card"><p class="eyebrow">EXPORT</p><h3>下載帳務紀錄</h3><p class="muted">CSV 可以直接用 Excel 或 Google 試算表開啟。</p>${isDemoMode ? '<button class="secondary" data-action="demo-export">下載範例 CSV</button>' : `<a class="secondary button-link" href="${exportUrl()}" target="_blank" rel="noreferrer">下載 CSV</a>`}</article><article class="panel setting-card danger-zone"><p class="eyebrow">DEMO DATA</p><h3>清除範例資料</h3><p class="muted">僅限本機範例模式。正式環境為了避免誤刪，共用資料需逐筆刪除。</p><button class="secondary danger" data-action="clear-demo" ${isDemoMode ? "" : "disabled"}>清除範例</button></article></section>`);
+  layout(`<section class="settings-grid"><article class="panel setting-card"><p class="eyebrow">PROJECT</p><h3>${esc(payload!.project.name)}</h3><p class="muted">新臺幣（TWD） · 最後更新 ${new Intl.DateTimeFormat("zh-TW", { dateStyle: "medium", timeStyle: "short" }).format(new Date(payload!.project.updatedAt))}</p><button class="secondary" data-action="edit-project">修改專案名稱</button></article><article class="panel setting-card"><p class="eyebrow">EXPORT</p><h3>下載帳務紀錄</h3><p class="muted">CSV 可以直接用 Excel 或 Google 試算表開啟。</p>${isDemoMode ? '<button class="secondary" data-action="demo-export">下載範例 CSV</button>' : `<a class="secondary button-link" href="${exportUrl()}" target="_blank" rel="noreferrer">下載 CSV</a>`}</article><article class="panel setting-card danger-zone"><p class="eyebrow">DEMO DATA</p><h3>清除範例資料</h3><p class="muted">僅限本機範例模式。正式環境為了避免誤刪，共用資料需逐筆刪除。</p><button class="secondary danger" data-action="clear-demo" ${isDemoMode ? "" : "disabled"}>清除範例</button></article></section>`);
 }
 
 function render() {
@@ -109,6 +109,18 @@ function openCategoryModal(existing?: Category) {
     try {
       await saveCategory({ name: String(form.get("name")).trim(), plannedAmount: Number(form.get("plannedAmount")), color: String(form.get("color")) }, existing?.id);
       document.querySelector(".modal-backdrop")?.remove(); await refresh(); toast("分類已儲存");
+    } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
+  });
+}
+
+function openProjectModal() {
+  openModal(`<div class="modal-head"><div><p class="eyebrow">PROJECT NAME</p><h3>修改專案名稱</h3></div><button class="icon-button" data-action="close-modal">×</button></div><form id="project-form" class="form-grid"><label class="full">專案名稱<input name="name" maxlength="60" required value="${esc(payload!.project.name)}" placeholder="例如：沐光宅整修計畫" autofocus /></label><p class="muted full">儲存後，左側標誌、頁首與設定頁會同步更新。</p><div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存名稱</button></div></form>`);
+  document.querySelector<HTMLFormElement>("#project-form")!.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = String(new FormData(event.currentTarget as HTMLFormElement).get("name")).trim();
+    try {
+      await saveProjectName(name);
+      document.querySelector(".modal-backdrop")?.remove(); await refresh(); toast("專案名稱已更新");
     } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
   });
 }
@@ -143,6 +155,7 @@ function bindCommon() {
     const action = button.dataset.action;
     if (action === "logout") { session.token = null; payload = null; showLogin(); }
     if (action === "refresh") { await refresh(); toast("資料已更新"); }
+    if (action === "edit-project") openProjectModal();
     if (action === "new-category") openCategoryModal();
     if (action === "edit-category") openCategoryModal(payload!.categories.find((category) => category.id === button.dataset.id));
     if (action === "delete-category") {
