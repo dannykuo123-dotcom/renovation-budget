@@ -17,6 +17,14 @@ export interface Category {
   plannedAmount: number;
   color: string;
   sortOrder: number;
+  items: BudgetItem[];
+}
+
+export interface BudgetItem {
+  id: string;
+  name: string;
+  plannedAmount: number;
+  sortOrder: number;
 }
 
 export interface LedgerEntry {

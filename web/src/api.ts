@@ -37,6 +37,13 @@ export interface EntryInput {
   note: string;
 }
 
+export interface CategoryInput {
+  name: string;
+  plannedAmount: number;
+  color: string;
+  items: Array<Pick<Category["items"][number], "name" | "plannedAmount">>;
+}
+
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -155,18 +162,30 @@ function touchDemo(projectId: string) {
 
 export async function saveCategory(
   projectId: string,
-  input: Omit<Category, "id" | "sortOrder">,
+  input: CategoryInput,
   categoryId?: string,
 ): Promise<Category> {
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;
     if (categoryId) {
       const item = dashboard.categories.find((category) => category.id === categoryId)!;
-      Object.assign(item, input);
+      Object.assign(item, {
+        ...input,
+        items: input.items.map((detail, index) => ({
+          ...detail,
+          id: item.items[index]?.id ?? crypto.randomUUID(),
+          sortOrder: index + 1,
+        })),
+      });
       touchDemo(projectId);
       return clone(item);
     }
-    const item = { ...input, id: crypto.randomUUID(), sortOrder: dashboard.categories.length + 1 };
+    const item: Category = {
+      ...input,
+      items: input.items.map((detail, index) => ({ ...detail, id: crypto.randomUUID(), sortOrder: index + 1 })),
+      id: crypto.randomUUID(),
+      sortOrder: dashboard.categories.length + 1,
+    };
     dashboard.categories.push(item);
     touchDemo(projectId);
     return clone(item);

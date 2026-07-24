@@ -21,6 +21,10 @@ type EntryInput = {
   paymentMethod: string;
   note: string;
 };
+type BudgetItemInput = {
+  name: string;
+  plannedAmount: number;
+};
 
 const encoder = new TextEncoder();
 const now = () => new Date().toISOString();
@@ -112,6 +116,22 @@ function text(value: unknown, limit: number): string {
 
 function parseMoney(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function parseBudgetItems(value: unknown): BudgetItemInput[] | null {
+  if (!Array.isArray(value) || value.length > 80) return null;
+  const items: BudgetItemInput[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    const detail = item as Record<string, unknown>;
+    const name = text(detail.name, 60);
+    const plannedAmount = detail.plannedAmount;
+    if (!name || typeof plannedAmount !== "number" || !Number.isSafeInteger(plannedAmount) || plannedAmount < 0) {
+      return null;
+    }
+    items.push({ name, plannedAmount });
+  }
+  return items;
 }
 
 function parseProject(input: Record<string, unknown>) {
@@ -215,13 +235,49 @@ const mapProjectSummary = (row: Record<string, unknown>) => ({
   pending: Number(row.pending ?? 0),
 });
 
-const mapCategory = (row: Record<string, unknown>) => ({
+const mapBudgetItem = (row: Record<string, unknown>) => ({
+  id: row.id,
+  name: row.name,
+  plannedAmount: row.planned_amount,
+  sortOrder: row.sort_order,
+});
+
+const mapCategory = (row: Record<string, unknown>, items: Record<string, unknown>[] = []) => ({
   id: row.id,
   name: row.name,
   plannedAmount: row.planned_amount,
   color: row.color,
   sortOrder: row.sort_order,
+  items: items.filter((item) => item.category_id === row.id).map(mapBudgetItem),
 });
+
+async function categoryWithItems(env: Env, projectId: string, categoryId: string): Promise<Record<string, unknown> | null> {
+  const [category, itemResult] = await Promise.all([
+    env.DB.prepare(
+      "SELECT id, name, planned_amount, color, sort_order FROM budget_categories WHERE id = ? AND project_id = ?",
+    ).bind(categoryId, projectId).first<Record<string, unknown>>(),
+    env.DB.prepare(
+      "SELECT id, category_id, name, planned_amount, sort_order FROM budget_line_items WHERE category_id = ? AND project_id = ? ORDER BY sort_order, name",
+    ).bind(categoryId, projectId).all<Record<string, unknown>>(),
+  ]);
+  return category ? mapCategory(category, itemResult.results) : null;
+}
+
+async function replaceBudgetItems(
+  env: Env,
+  projectId: string,
+  categoryId: string,
+  items: BudgetItemInput[],
+  timestamp: string,
+): Promise<void> {
+  await env.DB.prepare("DELETE FROM budget_line_items WHERE category_id = ? AND project_id = ?")
+    .bind(categoryId, projectId).run();
+  for (const [index, item] of items.entries()) {
+    await env.DB.prepare(
+      "INSERT INTO budget_line_items (id, project_id, category_id, name, planned_amount, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    ).bind(newId(), projectId, categoryId, item.name, item.plannedAmount, index + 1, timestamp, timestamp).run();
+  }
+}
 
 const mapAttachment = (row: Record<string, unknown>) => ({
   id: row.id,
@@ -353,10 +409,13 @@ async function setProjectStatus(env: Env, projectId: string, status: ProjectStat
 }
 
 async function dashboard(env: Env, projectId: string): Promise<Response> {
-  const [project, categoryResult, entryResult, attachmentResult] = await Promise.all([
+  const [project, categoryResult, itemResult, entryResult, attachmentResult] = await Promise.all([
     findProject(projectId, env),
     env.DB.prepare(
       "SELECT id, name, planned_amount, color, sort_order FROM budget_categories WHERE project_id = ? ORDER BY sort_order, name",
+    ).bind(projectId).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      "SELECT id, category_id, name, planned_amount, sort_order FROM budget_line_items WHERE project_id = ? ORDER BY category_id, sort_order, name",
     ).bind(projectId).all<Record<string, unknown>>(),
     env.DB.prepare(
       "SELECT * FROM ledger_entries WHERE project_id = ? ORDER BY occurred_on DESC, created_at DESC",
@@ -368,7 +427,7 @@ async function dashboard(env: Env, projectId: string): Promise<Response> {
   if (!project) return json({ error: "找不到此工程案" }, { status: 404 });
   return json({
     project: mapProject(project),
-    categories: categoryResult.results.map(mapCategory),
+    categories: categoryResult.results.map((category) => mapCategory(category, itemResult.results)),
     entries: entryResult.results.map((entry) => mapEntry(entry, attachmentResult.results)),
   });
 }
@@ -376,20 +435,27 @@ async function dashboard(env: Env, projectId: string): Promise<Response> {
 async function categories(request: Request, env: Env, projectId: string, categoryId?: string): Promise<Response> {
   if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   if (!categoryId && request.method === "GET") {
-    const result = await env.DB.prepare(
-      "SELECT id, name, planned_amount, color, sort_order FROM budget_categories WHERE project_id = ? ORDER BY sort_order, name",
-    ).bind(projectId).all<Record<string, unknown>>();
-    return json(result.results.map(mapCategory));
+    const [result, itemResult] = await Promise.all([
+      env.DB.prepare(
+        "SELECT id, name, planned_amount, color, sort_order FROM budget_categories WHERE project_id = ? ORDER BY sort_order, name",
+      ).bind(projectId).all<Record<string, unknown>>(),
+      env.DB.prepare(
+        "SELECT id, category_id, name, planned_amount, sort_order FROM budget_line_items WHERE project_id = ? ORDER BY category_id, sort_order, name",
+      ).bind(projectId).all<Record<string, unknown>>(),
+    ]);
+    return json(result.results.map((category) => mapCategory(category, itemResult.results)));
   }
   if (!categoryId && request.method === "POST") {
     const body = await requireJson(request);
     const name = text(body.name, 30);
-    const plannedAmount =
+    const manualPlannedAmount =
       typeof body.plannedAmount === "number" && Number.isSafeInteger(body.plannedAmount) && body.plannedAmount >= 0
         ? body.plannedAmount
         : null;
+    const items = body.items === undefined ? undefined : parseBudgetItems(body.items);
+    const plannedAmount = items?.reduce((sum, item) => sum + item.plannedAmount, 0) ?? manualPlannedAmount;
     const color = /^#[0-9a-fA-F]{6}$/.test(String(body.color)) ? String(body.color) : "#1d6f63";
-    if (!name || plannedAmount === null) return json({ error: "分類名稱或預算不正確" }, { status: 400 });
+    if (!name || plannedAmount === null || items === null) return json({ error: "分類名稱、預算或細項不正確" }, { status: 400 });
     const max = await env.DB.prepare(
       "SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM budget_categories WHERE project_id = ?",
     ).bind(projectId).first<{ max_order: number }>();
@@ -398,8 +464,9 @@ async function categories(request: Request, env: Env, projectId: string, categor
     await env.DB.prepare(
       "INSERT INTO budget_categories (id, project_id, name, planned_amount, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).bind(id, projectId, name, plannedAmount, color, (max?.max_order ?? 0) + 1, timestamp, timestamp).run();
+    if (items) await replaceBudgetItems(env, projectId, id, items, timestamp);
     await touchProject(projectId, env);
-    return json({ id, name, plannedAmount, color, sortOrder: (max?.max_order ?? 0) + 1 }, { status: 201 });
+    return json((await categoryWithItems(env, projectId, id))!, { status: 201 });
   }
   if (!categoryId) return json({ error: "找不到分類操作" }, { status: 404 });
   const existing = await env.DB.prepare(
@@ -409,20 +476,21 @@ async function categories(request: Request, env: Env, projectId: string, categor
   if (request.method === "PATCH") {
     const body = await requireJson(request);
     const name = text(body.name, 30);
-    const plannedAmount =
+    const manualPlannedAmount =
       typeof body.plannedAmount === "number" && Number.isSafeInteger(body.plannedAmount) && body.plannedAmount >= 0
         ? body.plannedAmount
         : null;
+    const items = body.items === undefined ? undefined : parseBudgetItems(body.items);
+    const plannedAmount = items?.reduce((sum, item) => sum + item.plannedAmount, 0) ?? manualPlannedAmount;
     const color = /^#[0-9a-fA-F]{6}$/.test(String(body.color)) ? String(body.color) : "#1d6f63";
-    if (!name || plannedAmount === null) return json({ error: "分類名稱或預算不正確" }, { status: 400 });
+    if (!name || plannedAmount === null || items === null) return json({ error: "分類名稱、預算或細項不正確" }, { status: 400 });
+    const timestamp = now();
     await env.DB.prepare(
       "UPDATE budget_categories SET name = ?, planned_amount = ?, color = ?, updated_at = ? WHERE id = ? AND project_id = ?",
-    ).bind(name, plannedAmount, color, now(), categoryId, projectId).run();
+    ).bind(name, plannedAmount, color, timestamp, categoryId, projectId).run();
+    if (items) await replaceBudgetItems(env, projectId, categoryId, items, timestamp);
     await touchProject(projectId, env);
-    const category = await env.DB.prepare(
-      "SELECT id, name, planned_amount, color, sort_order FROM budget_categories WHERE id = ?",
-    ).bind(categoryId).first<Record<string, unknown>>();
-    return json(mapCategory(category!));
+    return json((await categoryWithItems(env, projectId, categoryId))!);
   }
   if (request.method === "DELETE") {
     const usage = await env.DB.prepare(

@@ -354,11 +354,12 @@ function renderBudget() {
   layout(`
     <section class="page-actions"><p>規劃各類工程的預估支出，並自動比對實際金額。</p><button class="primary" data-action="new-category">＋ 新增分類</button></section>
     <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th><button class="sort-button" data-sort-budget="name">分類 ${sortIndicator("name", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="planned">預估預算 ${sortIndicator("planned", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="spent">實際支出 ${sortIndicator("spent", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="remaining">剩餘 ${sortIndicator("remaining", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="percentage">使用率 ${sortIndicator("percentage", budgetSortKey, budgetSortDirection)}</button></th><th></th></tr></thead><tbody>
-      ${rows.map(({ category, spent, percentage }) => `<tr><td><span class="color-dot" style="background:${category.color}"></span>${esc(category.name)}</td><td>${formatMoney(category.plannedAmount)}</td><td>${formatMoney(spent)}</td><td class="${category.plannedAmount - spent < 0 ? "negative" : ""}">${formatMoney(category.plannedAmount - spent)}</td><td><div class="percentage"><i style="width:${Math.min(100, Math.max(0, percentage))}%;background:${category.color}"></i><span>${percentage}%</span></div></td><td class="row-actions"><button data-action="edit-category" data-id="${category.id}">編輯</button><button data-action="delete-category" data-id="${category.id}">刪除</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">還沒有分類，先新增一個預算分類吧。</td></tr>'}
+      ${rows.map(({ category, spent, percentage }) => `<tr><td><span class="color-dot" style="background:${category.color}"></span><strong class="budget-category-name">${esc(category.name)}</strong>${category.items.length ? `<div class="budget-item-list">${category.items.map((item) => `<span>${esc(item.name)} <b>${formatMoney(item.plannedAmount)}</b></span>`).join("")}</div>` : '<small class="budget-item-empty">尚未設定細項</small>'}</td><td>${formatMoney(category.plannedAmount)}</td><td>${formatMoney(spent)}</td><td class="${category.plannedAmount - spent < 0 ? "negative" : ""}">${formatMoney(category.plannedAmount - spent)}</td><td><div class="percentage"><i style="width:${Math.min(100, Math.max(0, percentage))}%;background:${category.color}"></i><span>${percentage}%</span></div></td><td class="row-actions"><button data-action="edit-category" data-id="${category.id}">編輯</button><button data-action="delete-category" data-id="${category.id}">刪除</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">還沒有分類，先新增一個預算分類吧。</td></tr>'}
     </tbody></table></div></section>
     <section class="mobile-record-list">${rows.map(({ category, spent, percentage }) => `
       <article class="mobile-record-card">
         <div class="mobile-record-head"><strong><span class="color-dot" style="background:${category.color}"></span>${esc(category.name)}</strong><span>${percentage}%</span></div>
+        ${category.items.length ? `<div class="mobile-budget-items">${category.items.map((item) => `<span>${esc(item.name)}<b>${formatMoney(item.plannedAmount)}</b></span>`).join("")}</div>` : '<small class="budget-item-empty">尚未設定細項</small>'}
         <div class="mobile-record-grid"><div><small>預估</small><b>${formatMoney(category.plannedAmount)}</b></div><div><small>已支出</small><b>${formatMoney(spent)}</b></div><div><small>剩餘</small><b class="${category.plannedAmount - spent < 0 ? "negative" : ""}">${formatMoney(category.plannedAmount - spent)}</b></div></div>
         <div class="mobile-record-actions"><button data-action="edit-category" data-id="${category.id}">編輯</button><button class="danger-text" data-action="delete-category" data-id="${category.id}">刪除</button></div>
       </article>`).join("") || '<div class="panel empty">還沒有分類，先新增一個預算分類吧。</div>'}</section>`, "budget");
@@ -531,18 +532,68 @@ function openCategoryModal(existing?: Category) {
     <div class="modal-head"><div><p class="eyebrow">BUDGET CATEGORY</p><h3>${existing ? "編輯分類" : "新增分類"}</h3></div><button class="icon-button" data-action="close-modal">×</button></div>
     <form id="category-form" class="form-grid">
       <label>分類名稱<input name="name" maxlength="30" required value="${esc(existing?.name ?? "")}" placeholder="例如：配電工程" /></label>
-      <label>預估預算<input name="plannedAmount" type="number" min="0" step="1" required value="${existing?.plannedAmount ?? ""}" placeholder="0" /></label>
+      <label>分類總預算<input name="plannedAmount" type="number" min="0" step="1" required value="${existing?.plannedAmount ?? ""}" placeholder="0" /></label>
       <label>識別顏色<input name="color" type="color" value="${existing?.color ?? "#1d6f63"}" /></label>
+      <section class="budget-detail-editor full">
+        <div class="budget-detail-head"><div><strong>預算細項</strong><small>新增細項後，分類總預算會自動加總。</small></div><button class="secondary small-button" type="button" data-action="add-budget-item">＋ 新增細項</button></div>
+        <div class="budget-detail-rows"></div>
+        <p class="form-hint budget-detail-total">尚未新增細項，可直接填寫分類總預算。</p>
+      </section>
       <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存分類</button></div>
     </form>`);
-  document.querySelector<HTMLFormElement>("#category-form")!.addEventListener("submit", async (event) => {
+  const formElement = document.querySelector<HTMLFormElement>("#category-form")!;
+  const detailRows = formElement.querySelector<HTMLElement>(".budget-detail-rows")!;
+  const plannedInput = formElement.elements.namedItem("plannedAmount") as HTMLInputElement;
+  const detailTotal = formElement.querySelector<HTMLElement>(".budget-detail-total")!;
+  const itemRow = (name = "", plannedAmount = "") => `<div class="budget-detail-row">
+    <input name="itemName" maxlength="60" value="${esc(name)}" placeholder="細項名稱，例如：木工（隔間）" />
+    <input name="itemAmount" type="number" min="0" step="1" value="${plannedAmount}" placeholder="金額" />
+    <button class="icon-button detail-remove" type="button" aria-label="移除細項" data-action="remove-budget-item">×</button>
+  </div>`;
+  const syncDetails = () => {
+    const rows = [...detailRows.querySelectorAll<HTMLElement>(".budget-detail-row")];
+    const total = rows.reduce((sum, row) => sum + Math.max(0, Number((row.querySelector("[name='itemAmount']") as HTMLInputElement).value) || 0), 0);
+    const hasDetails = rows.length > 0;
+    plannedInput.readOnly = hasDetails;
+    plannedInput.required = !hasDetails;
+    plannedInput.value = hasDetails ? String(total) : (existing?.plannedAmount ? String(existing.plannedAmount) : "");
+    detailTotal.textContent = hasDetails
+      ? `細項合計：${formatMoney(total)}（分類總預算已自動帶入）`
+      : "尚未新增細項，可直接填寫分類總預算。";
+  };
+  const addDetail = (name = "", plannedAmount = "") => {
+    detailRows.insertAdjacentHTML("beforeend", itemRow(name, plannedAmount));
+    syncDetails();
+  };
+  existing?.items.forEach((item) => addDetail(item.name, String(item.plannedAmount)));
+  formElement.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
+    if (!button) return;
+    if (button.dataset.action === "add-budget-item") addDetail();
+    if (button.dataset.action === "remove-budget-item") {
+      button.closest(".budget-detail-row")?.remove();
+      syncDetails();
+    }
+  });
+  detailRows.addEventListener("input", syncDetails);
+  syncDetails();
+  formElement.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget as HTMLFormElement);
+    const form = new FormData(formElement);
+    const items = [...detailRows.querySelectorAll<HTMLElement>(".budget-detail-row")]
+      .map((row) => ({
+        name: (row.querySelector("[name='itemName']") as HTMLInputElement).value.trim(),
+        plannedAmount: Number((row.querySelector("[name='itemAmount']") as HTMLInputElement).value),
+      }));
+    if (items.some((item) => !item.name || !Number.isSafeInteger(item.plannedAmount) || item.plannedAmount < 0)) {
+      return toast("每筆細項都需要名稱與非負整數金額。", "error");
+    }
     try {
       await saveCategory(currentProjectId(), {
         name: String(form.get("name")).trim(),
         plannedAmount: Number(form.get("plannedAmount")),
         color: String(form.get("color")),
+        items,
       }, existing?.id);
       document.querySelector(".modal-backdrop")?.remove();
       await refresh();

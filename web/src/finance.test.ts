@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { calculateTotals } from "./finance";
 import type { Category, LedgerEntry } from "./types";
 
-const categories: Category[] = [{ id: "c1", name: "材料", plannedAmount: 100000, color: "#6d5bd0", sortOrder: 1 }];
+const categories: Category[] = [{ id: "c1", name: "材料", plannedAmount: 100000, color: "#6d5bd0", sortOrder: 1, items: [] }];
 const entry = (kind: LedgerEntry["kind"], amount: number, status: LedgerEntry["status"] = "posted"): LedgerEntry => ({
   id: crypto.randomUUID(), kind, amount, status, refundOfEntryId: kind === "refund" ? "expense-1" : null, description: "x", occurredOn: "2026-07-01", categoryId: "c1",
   counterparty: "", paymentMethod: "轉帳", note: "", attachments: [], createdAt: "", updatedAt: "",

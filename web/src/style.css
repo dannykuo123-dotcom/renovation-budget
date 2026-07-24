@@ -100,6 +100,23 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
 .mobile-record-actions .danger-text { color: #9d5048; background: #f6e9e6; }
 /* Returned funds use the same positive amount color as received funding. */
 .returned { color: #1d806c !important; }
+.budget-category-name { display: inline; }
+.budget-item-list { display: grid; gap: 4px; margin: 8px 0 0 16px; color: #68756f; font-size: 12px; }
+.budget-item-list span { display: flex; justify-content: space-between; gap: 16px; }
+.budget-item-list b { color: #3f554d; font-weight: 700; white-space: nowrap; }
+.budget-item-empty { display: block; margin: 7px 0 0 16px; color: #89938e; font-size: 12px; }
+.mobile-budget-items { display: grid; gap: 5px; margin-top: 12px; padding: 10px; border-radius: 10px; background: #f6f8f5; color: #5d6d66; font-size: 12px; }
+.mobile-budget-items span { display: flex; justify-content: space-between; gap: 12px; }
+.mobile-budget-items b { color: #334c43; white-space: nowrap; }
+.budget-detail-editor { display: grid; gap: 10px; padding: 15px; border: 1px solid #dfe7e1; border-radius: 12px; background: #f8fbf8; }
+.budget-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.budget-detail-head strong, .budget-detail-head small { display: block; }
+.budget-detail-head small { margin-top: 3px; color: #748078; font-size: 12px; }
+.budget-detail-rows { display: grid; gap: 8px; }
+.budget-detail-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px 36px; gap: 8px; align-items: center; }
+.budget-detail-row input { min-width: 0; }
+.detail-remove { width: 36px; min-height: 36px; padding: 0; color: #a55c50; background: #fff5f2; }
+.small-button { min-height: 34px; padding: 7px 10px; white-space: nowrap; font-size: 12px; }
 
 @media (max-width: 1080px) {
   .hero-grid { grid-template-columns: repeat(2, 1fr); }
@@ -162,6 +179,11 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
   .form-grid .full, .form-submit { grid-column: auto; }
   .form-submit { justify-content: stretch; }
   .form-submit button { flex: 1; min-height: 46px; }
+  .budget-detail-editor { padding: 13px; }
+  .budget-detail-head { align-items: flex-start; }
+  .budget-detail-head small { max-width: 190px; }
+  .budget-detail-row { grid-template-columns: minmax(0, 1fr) 100px 36px; gap: 6px; }
+  .budget-detail-row input { min-height: 42px; padding: 8px; }
   .modal-backdrop { align-items: end; padding: 0; }
   .modal { width: 100%; max-height: 94vh; padding: 22px 18px calc(22px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; }
   input, select, textarea { min-height: 45px; font-size: 16px; }
