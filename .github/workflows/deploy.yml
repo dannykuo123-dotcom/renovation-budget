@@ -37,6 +37,7 @@ jobs:
       PAGES_ALLOWED_ORIGIN: ${{ vars.PAGES_ALLOWED_ORIGIN }}
       BUDGET_ACCESS_CODE: ${{ secrets.BUDGET_ACCESS_CODE }}
       SESSION_SIGNING_SECRET: ${{ secrets.SESSION_SIGNING_SECRET }}
+      VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
     defaults:
       run:
         working-directory: worker
@@ -57,6 +58,8 @@ jobs:
         run: npx wrangler d1 migrations apply renovation-budget --remote
       - name: Deploy Worker
         run: npx wrangler deploy
+      - name: Remove legacy R2 attachments
+        run: curl --fail --silent --show-error "$VITE_API_BASE_URL/api/health"
 
   deploy-pages:
     if: github.event_name != 'pull_request'

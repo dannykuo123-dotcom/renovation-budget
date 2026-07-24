@@ -5,4 +5,5 @@ dist/
 worker/wrangler.toml
 web/.env
 coverage/
+*.tsbuildinfo
 .DS_Store

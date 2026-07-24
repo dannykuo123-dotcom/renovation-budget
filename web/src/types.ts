@@ -1,5 +1,6 @@
 export type EntryKind = "income" | "expense" | "refund";
 export type EntryStatus = "posted" | "pending" | "void";
+export type ProjectStatus = "active" | "completed" | "archived";
 
 export interface Attachment {
   id: string;
@@ -34,14 +35,25 @@ export interface LedgerEntry {
   updatedAt: string;
 }
 
-export interface ProjectSettings {
+export interface Project {
+  id: string;
   name: string;
+  address: string;
+  status: ProjectStatus;
   currency: "TWD";
+  createdAt: string;
   updatedAt: string;
 }
 
+export interface ProjectSummary extends Project {
+  planned: number;
+  received: number;
+  spent: number;
+  pending: number;
+}
+
 export interface DashboardPayload {
-  project: ProjectSettings;
+  project: Project;
   categories: Category[];
   entries: LedgerEntry[];
 }

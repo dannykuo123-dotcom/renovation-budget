@@ -1,6 +1,6 @@
-# 家作帳｜GitHub Pages 裝修預算
+# 彩虹水電｜多工程案預算管理
 
-一個可部署到 GitHub Pages 的裝修預算管理介面。前端使用 GitHub Pages；共用密碼、帳務資料與憑證圖片由 Cloudflare Worker、D1 與 R2 保存。
+一個可部署到 GitHub Pages 的多工程案預算管理介面。前端使用 GitHub Pages；共用密碼、各工程帳務與憑證圖片由 Cloudflare Worker、D1 與 R2 保存。
 
 ## 本機開發
 
@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-未設定 `web/.env` 時，前端會進入匿名範例模式，輸入任意非空白代碼即可體驗畫面。這個模式的資料不會保存。
+未設定 `web/.env` 時，前端會進入本機模式，輸入任意非空白代碼即可建立工程案並體驗畫面。這個模式的資料只保存在目前分頁。
 
 要連接雲端 Worker，複製 `web/.env.example` 成 `web/.env`，填入：
 
@@ -37,10 +37,12 @@ npm run build
    - `SESSION_SIGNING_SECRET`（長隨機字串）
 4. 新增 Variables：
    - `VITE_API_BASE_URL`：Worker 的完整 HTTPS 網址
-   - `PAGES_ALLOWED_ORIGIN`：`https://<GitHub帳號>.github.io/<Repository名稱>`
+   - `PAGES_ALLOWED_ORIGIN`：`https://<GitHub帳號>.github.io`（Origin 不包含 Repository 路徑）
 5. 在 Repository Settings → Pages 將 Source 選為 **GitHub Actions**。
 
 推送到 `main` 後，工作流程會先測試，再套用 D1 migration、部署 Worker，最後部署 GitHub Pages。Pull Request 只會測試和建置，不會發布。
+
+登入後會先進入工程案列表。每個工程案擁有獨立的預算分類、收支、CSV 與 R2 憑證；工程網址使用 `#/projects/<id>/...`，可在 GitHub Pages 直接重新整理與分享。
 
 ## 安全界線
 
