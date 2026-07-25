@@ -1,5 +1,6 @@
 export type EntryKind = "income" | "expense" | "refund";
 export type EntryStatus = "posted" | "pending" | "void";
+export type TransferStatus = "posted" | "pending" | "void";
 export type ProjectStatus = "active" | "completed" | "archived";
 
 export interface Attachment {
@@ -36,6 +37,7 @@ export interface LedgerEntry {
   amount: number;
   occurredOn: string;
   categoryId: string | null;
+  personId: string | null;
   counterparty: string;
   paymentMethod: string;
   note: string;
@@ -44,6 +46,38 @@ export interface LedgerEntry {
   updatedAt: string;
 }
 
+
+export interface Person {
+  id: string;
+  name: string;
+  role: string;
+  note: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FundTransfer {
+  id: string;
+  fromPersonId: string;
+  toPersonId: string;
+  amount: number;
+  occurredOn: string;
+  status: TransferStatus;
+  paymentMethod: string;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersonCashflowSummary {
+  person: Person;
+  received: number;
+  paid: number;
+  pendingReceive: number;
+  pendingPay: number;
+  net: number;
+}
 export interface Project {
   id: string;
   name: string;
@@ -65,4 +99,6 @@ export interface DashboardPayload {
   project: Project;
   categories: Category[];
   entries: LedgerEntry[];
+  people: Person[];
+  transfers: FundTransfer[];
 }

@@ -205,3 +205,12 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
   .metric-card { min-height: 112px; }
   .project-money { grid-template-columns: 1fr 1fr; }
 }
+.cashflow-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+.cashflow-tabs .selected-tab { color: #fff; background: #1d6f63; border-color: #1d6f63; }
+.cashflow-tabs button { min-height: 38px; }
+.mobile-record-actions { display: flex; gap: 8px; margin-top: 12px; }
+.mobile-record-actions button { min-height: 34px; }
+@media (max-width: 720px) {
+  .cashflow-tabs { overflow-x: auto; padding-bottom: 2px; }
+  .mobile-nav { grid-template-columns: repeat(6, 1fr); left: 4px; right: 4px; }
+}

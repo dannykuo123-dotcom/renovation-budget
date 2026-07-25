@@ -5,9 +5,14 @@ import {
   deleteCategory,
   deleteEntry,
   downloadProjectCsv,
+  downloadCashflowCsv,
+  deletePerson,
+  deleteTransfer,
   isDemoMode,
   loadDashboard,
   loadProjects,
+  savePerson,
+  saveTransfer,
   login,
   saveCategory,
   saveEntry,
@@ -16,11 +21,13 @@ import {
   updateProject,
   uploadAttachments,
 } from "./api";
-import { calculateTotals, categorySpent, formatMoney } from "./finance";
+import { calculatePersonCashflows, calculateTotals, categorySpent, formatMoney } from "./finance";
 import { parseRoute, projectRoute, projectsRoute, type ProjectView } from "./router";
 import type {
   Category,
   DashboardPayload,
+  FundTransfer,
+  Person,
   EntryKind,
   LedgerEntry,
   Project,
@@ -35,6 +42,11 @@ let filterCategory = "";
 let filterStatus = "";
 let mobileFiltersOpen = false;
 let loading = false;
+type CashflowTab = "overview" | "records" | "people";
+let cashflowTab: CashflowTab = "overview";
+let cashflowPersonFilter = "";
+let cashflowStatusFilter = "";
+let cashflowTypeFilter = "";
 type SortDirection = "asc" | "desc";
 type BudgetSortKey = "sortOrder" | "name" | "planned" | "spent" | "remaining" | "percentage";
 type EntrySortKey = "occurredOn" | "description" | "category" | "counterparty" | "paymentMethod" | "status" | "amount";
@@ -64,6 +76,21 @@ function currentProjectId(): string {
 
 function categoryName(id: string | null): string {
   return payload?.categories.find((category) => category.id === id)?.name ?? "未分類";
+}
+function personById(id: string | null): Person | undefined {
+  return payload?.people.find((person) => person.id === id);
+}
+
+function personName(id: string | null): string {
+  const person = personById(id);
+  return person ? `${person.name}${person.role ? `?${person.role}?` : ""}` : "???";
+}
+
+function activePersonOptions(selectedId: string | null, includeInactive = false): string {
+  const people = payload!.people.filter((person) => person.active || person.id === selectedId || includeInactive);
+  return `<option value="">\u8acb\u9078\u64c7\u4eba\u54e1</option>${people.map((person) =>
+    `<option value="${person.id}" ${person.id === selectedId ? "selected" : ""}>${esc(person.name)}${person.role ? `\uff08${esc(person.role)}\uff09` : ""}${person.active ? "" : "\uff08\u5df2\u505c\u7528\uff09"}</option>`,
+  ).join("")}`;
 }
 
 function isReturned(entry: LedgerEntry): boolean {
@@ -261,6 +288,7 @@ function layout(content: string, view: ProjectView) {
     budget: "預算分類",
     expenses: "支出紀錄",
     funding: "資金入帳",
+    cashflow: "\u8cc7\u91d1\u6d41",
     settings: "工程設定",
   };
   app.innerHTML = `
@@ -274,6 +302,7 @@ function layout(content: string, view: ProjectView) {
           ${navLink("dashboard", "⌂", "總覽", view)}
           ${navLink("budget", "▦", "預算分類", view)}
           ${navLink("expenses", "↗", "支出紀錄", view)}
+          ${navLink("cashflow", "&#8644;", "\u8cc7\u91d1\u6d41", view)}
           ${navLink("funding", "＋", "資金入帳", view)}
           ${navLink("settings", "⚙", "工程設定", view)}
         </nav>
@@ -292,6 +321,7 @@ function layout(content: string, view: ProjectView) {
       <nav class="mobile-nav">
         ${navLink("dashboard", "⌂", "總覽", view)}
         ${navLink("budget", "▦", "預算", view)}
+        ${navLink("cashflow", "&#8644;", "\u8cc7\u91d1\u6d41", view)}
         ${navLink("expenses", "↗", "支出", view)}
         ${navLink("funding", "＋", "入帳", view)}
         ${navLink("settings", "•••", "更多", view)}
@@ -470,6 +500,38 @@ function renderEntries(view: "expenses" | "funding") {
   }));
 }
 
+function renderCashflow() {
+  const summaries = calculatePersonCashflows(payload!.people, payload!.entries, payload!.transfers);
+  const entryFlows = payload!.entries.filter((entry) => entry.personId).map((entry) => {
+    const isExpense = entry.kind === "expense";
+    return { id: entry.id, source: entry.kind, occurredOn: entry.occurredOn, status: entry.status, amount: entry.amount, paymentMethod: entry.paymentMethod, note: entry.note, fromId: isExpense ? null : entry.personId, toId: isExpense ? entry.personId : null, direct: false };
+  });
+  const transferFlows = payload!.transfers.map((transfer) => ({
+    id: transfer.id, source: "transfer", occurredOn: transfer.occurredOn, status: transfer.status, amount: transfer.amount, paymentMethod: transfer.paymentMethod, note: transfer.note, fromId: transfer.fromPersonId, toId: transfer.toPersonId, direct: true,
+  }));
+  const rows = [...entryFlows, ...transferFlows].filter((row) =>
+    (!cashflowPersonFilter || row.fromId === cashflowPersonFilter || row.toId === cashflowPersonFilter) &&
+    (!cashflowStatusFilter || row.status === cashflowStatusFilter) &&
+    (!cashflowTypeFilter || row.source === cashflowTypeFilter),
+  ).sort((left, right) => right.occurredOn.localeCompare(left.occurredOn));
+  const tab = (id: CashflowTab, label: string) => `<button class="secondary ${cashflowTab === id ? "selected-tab" : ""}" data-cashflow-tab="${id}">${label}</button>`;
+  const tabs = `<section class="cashflow-tabs">${tab("overview", "\\u6982\\u6cc1")}${tab("records", "\\u7d00\\u9304")}${tab("people", "\\u4eba\\u54e1\\u7ba1\\u7406")}</section>`;
+  const personOptions = `<option value="">\\u5168\\u90e8\\u4eba\\u54e1</option>${payload!.people.map((person) => `<option value="${person.id}" ${cashflowPersonFilter === person.id ? "selected" : ""}>${esc(person.name)}</option>`).join("")}`;
+  const overview = `<section class="page-actions"><p>\\u6de8\\u984d\\u70ba\\u5df2\\u6536\\u6e1b\\u5df2\\u4ed8\\uff1b\\u5f85\\u8655\\u7406\\u91d1\\u984d\\u53e6\\u5217\\u986f\\u793a\\u3002</p><button class="primary" data-action="new-transfer">? \\u65b0\\u589e\\u79fb\\u8f49</button></section>
+    <section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>\\u4eba\\u54e1</th><th>\\u5df2\\u6536</th><th>\\u5df2\\u4ed8</th><th>\\u5f85\\u6536</th><th>\\u5f85\\u4ed8</th><th>\\u6de8\\u984d</th></tr></thead><tbody>${summaries.map((summary) => `<tr><td><strong>${esc(summary.person.name)}</strong>${summary.person.role ? `<small> ${esc(summary.person.role)}</small>` : ""}${summary.person.active ? "" : ' <span class="status void">\\u5df2\\u505c\\u7528</span>'}</td><td>${formatMoney(summary.received)}</td><td>${formatMoney(summary.paid)}</td><td>${formatMoney(summary.pendingReceive)}</td><td>${formatMoney(summary.pendingPay)}</td><td class="${summary.net < 0 ? "negative" : "income"}"><strong>${summary.net >= 0 ? "\\u6de8\\u6536 " : "\\u6de8\\u4ed8 "}${formatMoney(Math.abs(summary.net))}</strong></td></tr>`).join("") || '<tr><td colspan="6" class="empty">\\u8acb\\u5148\\u65b0\\u589e\\u4eba\\u54e1</td></tr>'}</tbody></table></div></section>`;
+  const records = `<section class="page-actions"><p>\\u5de5\\u7a0b\\u5e33\\u6236\\u53ca\\u4eba\\u54e1\\u9593\\u7684\\u5be6\\u969b\\u91d1\\u6d41\\u3002</p><div class="entry-action-buttons"><button class="secondary" data-action="export-cashflow">\\u4e0b\\u8f09 CSV</button><button class="primary" data-action="new-transfer">? \\u65b0\\u589e\\u79fb\\u8f49</button></div></section>
+    <section class="panel desktop-entry-filters"><label>\\u4eba\\u54e1<select id="cashflow-person-filter">${personOptions}</select></label><label>\\u4f86\\u6e90<select id="cashflow-type-filter"><option value="">\\u5168\\u90e8</option><option value="income" ${cashflowTypeFilter === "income" ? "selected" : ""}>\\u5165\\u5e33</option><option value="expense" ${cashflowTypeFilter === "expense" ? "selected" : ""}>\\u652f\\u51fa</option><option value="refund" ${cashflowTypeFilter === "refund" ? "selected" : ""}>\\u9000\\u6b3e</option><option value="transfer" ${cashflowTypeFilter === "transfer" ? "selected" : ""}>\\u4eba\\u54e1\\u79fb\\u8f49</option></select></label><label>\\u72c0\\u614b<select id="cashflow-status-filter"><option value="">\\u5168\\u90e8</option><option value="posted" ${cashflowStatusFilter === "posted" ? "selected" : ""}>\\u5df2\\u5b8c\\u6210</option><option value="pending" ${cashflowStatusFilter === "pending" ? "selected" : ""}>\\u5f85\\u8655\\u7406</option><option value="void" ${cashflowStatusFilter === "void" ? "selected" : ""}>\\u5df2\\u4f5c\\u5ee2</option></select></label></section>
+    <section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>\\u65e5\\u671f</th><th>\\u4f86\\u6e90</th><th>\\u4ed8\\u6b3e\\u65b9</th><th>\\u6536\\u6b3e\\u65b9</th><th>\\u72c0\\u614b</th><th>\\u91d1\\u984d</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr><td>${dateLabel(row.occurredOn)}</td><td>${row.source === "transfer" ? "\\u4eba\\u54e1\\u79fb\\u8f49" : kindLabel[row.source as EntryKind]}</td><td>${esc(row.fromId ? personName(row.fromId) : "\\u5de5\\u7a0b\\u5e33\\u6236")}</td><td>${esc(row.toId ? personName(row.toId) : "\\u5de5\\u7a0b\\u5e33\\u6236")}</td><td><span class="status ${row.status}">${row.status === "posted" ? "\\u5df2\\u5b8c\\u6210" : row.status === "pending" ? "\\u5f85\\u8655\\u7406" : "\\u5df2\\u4f5c\\u5ee2"}</span></td><td class="amount">${formatMoney(row.amount)}</td><td>${row.direct ? `<button data-action="edit-transfer" data-id="${row.id}">\\u7de8\\u8f2f</button><button data-action="delete-transfer" data-id="${row.id}">\\u522a\\u9664</button>` : '<small>\\u8acb\\u5f9e\\u6536\\u652f\\u7de8\\u8f2f</small>'}</td></tr>`).join("") || '<tr><td colspan="7" class="empty">\\u76ee\\u524d\\u6c92\\u6709\\u8cc7\\u91d1\\u6d41\\u7d00\\u9304</td></tr>'}</tbody></table></div></section>`;
+  const people = `<section class="page-actions"><p>\\u4eba\\u54e1\\u540d\\u55ae\\u50c5\\u5c6c\\u65bc\\u6b64\\u5de5\\u7a0b\\u3002\\u5df2\\u88ab\\u5f15\\u7528\\u7684\\u4eba\\u54e1\\u53ef\\u505c\\u7528\\uff0c\\u4f46\\u4e0d\\u53ef\\u522a\\u9664\\u3002</p><button class="primary" data-action="new-person">? \\u65b0\\u589e\\u4eba\\u54e1</button></section>
+    <section class="mobile-record-list">${payload!.people.map((person) => `<article class="mobile-record-card"><div class="mobile-record-head"><div><strong>${esc(person.name)}</strong><small>${esc(person.role || "\\u672a\\u5206\\u985e")}</small></div><span class="status ${person.active ? "posted" : "void"}">${person.active ? "\\u555f\\u7528" : "\\u5df2\\u505c\\u7528"}</span></div>${person.note ? `<p class="muted">${esc(person.note)}</p>` : ""}<div class="mobile-record-actions"><button data-action="edit-person" data-id="${person.id}">\\u7de8\\u8f2f</button><button data-action="delete-person" data-id="${person.id}">\\u522a\\u9664</button></div></article>`).join("") || '<div class="panel empty">\\u9084\\u6c92\\u6709\\u4eba\\u54e1</div>'}</section>`;
+  const decodeEscapes = (value: string) => value.replace(/\\u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
+  layout(decodeEscapes(`${tabs}${cashflowTab === "overview" ? overview : cashflowTab === "records" ? records : people}`), "cashflow");
+  document.querySelectorAll<HTMLButtonElement>("[data-cashflow-tab]").forEach((button) => button.addEventListener("click", () => { cashflowTab = button.dataset.cashflowTab as CashflowTab; renderCashflow(); }));
+  document.querySelector<HTMLSelectElement>("#cashflow-person-filter")?.addEventListener("change", (event) => { cashflowPersonFilter = (event.target as HTMLSelectElement).value; renderCashflow(); });
+  document.querySelector<HTMLSelectElement>("#cashflow-type-filter")?.addEventListener("change", (event) => { cashflowTypeFilter = (event.target as HTMLSelectElement).value; renderCashflow(); });
+  document.querySelector<HTMLSelectElement>("#cashflow-status-filter")?.addEventListener("change", (event) => { cashflowStatusFilter = (event.target as HTMLSelectElement).value; renderCashflow(); });
+}
+
 function renderSettings() {
   const project = payload!.project;
   layout(`
@@ -484,6 +546,7 @@ function renderProjectPage(view: ProjectView) {
   if (!payload) return;
   if (view === "dashboard") renderDashboard();
   else if (view === "budget") renderBudget();
+  else if (view === "cashflow") renderCashflow();
   else if (view === "expenses" || view === "funding") renderEntries(view);
   else renderSettings();
 }
@@ -622,6 +685,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       <label>日期<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
       <label class="full refund-source-field">原始支出<select name="refundOfEntryId">${refundSourceOptions}</select></label>
       <label>預算分類<select name="categoryId">${categoryOptions}</select></label>
+      <label>\u4eba\u54e1<select name="personId" required>${activePersonOptions(existing?.personId ?? null)}</select></label>
       <label>對象<input name="counterparty" maxlength="60" value="${esc(existing?.counterparty ?? "")}" placeholder="廠商或匯款人" /></label>
       <label>付款方式<select name="paymentMethod"><option value="">未指定</option>${["銀行轉帳", "現金", "信用卡", "電子支付"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
       <label>狀態<select name="status"></select></label>
@@ -638,6 +702,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
   const amountInput = formElement.elements.namedItem("amount") as HTMLInputElement;
   const descriptionInput = formElement.elements.namedItem("description") as HTMLInputElement;
   const counterpartyInput = formElement.elements.namedItem("counterparty") as HTMLInputElement;
+  const personInput = formElement.elements.namedItem("personId") as HTMLSelectElement;
   const paymentInput = formElement.elements.namedItem("paymentMethod") as HTMLSelectElement;
   const sourceField = formElement.querySelector<HTMLElement>(".refund-source-field")!;
   const hint = formElement.querySelector<HTMLElement>(".form-hint")!;
@@ -651,6 +716,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     if (!source) return;
     descriptionInput.value = `退貨：${source.description}`;
     categoryInput.value = source.categoryId ?? "";
+    personInput.value = source.personId ?? "";
     counterpartyInput.value = source.counterparty;
     paymentInput.value = source.paymentMethod;
     amountInput.max = String(source.amount - refundReserved(source.id, existing?.id));
@@ -661,6 +727,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     const isRefundKind = kindInput.value === "refund";
     sourceField.hidden = !isRefundKind;
     sourceInput.disabled = !isRefundKind;
+    personInput.disabled = isRefundKind;
     sourceInput.required = isRefundKind;
     categoryInput.disabled = isRefundKind;
     hint.textContent = isRefundKind
@@ -683,15 +750,17 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     }
     try {
       const projectId = currentProjectId();
+      const selectedPerson = personById(String(form.get("personId")) || null);
       const result = await saveEntry(projectId, {
         kind: String(form.get("kind")) as EntryKind,
         status: String(form.get("status")) as LedgerEntry["status"],
         refundOfEntryId: form.get("refundOfEntryId")?.toString() || null,
+        personId: String(form.get("personId")) || null,
+        counterparty: selectedPerson?.name ?? String(form.get("counterparty")).trim(),
         description: String(form.get("description")).trim(),
         amount: Number(form.get("amount")),
         occurredOn: String(form.get("occurredOn")),
         categoryId: String(form.get("categoryId")) || null,
-        counterparty: String(form.get("counterparty")).trim(),
         paymentMethod: String(form.get("paymentMethod")),
         note: String(form.get("note")).trim(),
       }, existing?.id);
@@ -702,6 +771,55 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     } catch (reason) {
       toast(reason instanceof Error ? reason.message : "儲存失敗", "error");
     }
+  });
+}
+
+function openPersonModal(existing?: Person) {
+  openModal(`
+    <div class="modal-head"><div><p class="eyebrow">PERSON</p><h3>${existing ? "Edit person" : "Add person"}</h3></div><button class="icon-button" data-action="close-modal">?</button></div>
+    <form id="person-form" class="form-grid">
+      <label>Name<input name="name" maxlength="60" required value="${esc(existing?.name ?? "")}" autofocus /></label>
+      <label>Role<input name="role" maxlength="40" value="${esc(existing?.role ?? "")}" placeholder="Owner, vendor..." /></label>
+      <label class="full">Note<textarea name="note" maxlength="500">${esc(existing?.note ?? "")}</textarea></label>
+      <label><input name="active" type="checkbox" ${existing?.active === false ? "" : "checked"} /> Active</label>
+      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">Cancel</button><button class="primary" type="submit">Save</button></div>
+    </form>`);
+  document.querySelector<HTMLFormElement>("#person-form")!.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget as HTMLFormElement);
+    try {
+      await savePerson(currentProjectId(), { name: String(form.get("name")).trim(), role: String(form.get("role")).trim(), note: String(form.get("note")).trim(), active: form.get("active") === "on" }, existing?.id);
+      document.querySelector(".modal-backdrop")?.remove();
+      await refresh();
+      toast("Saved");
+    } catch (reason) { toast(reason instanceof Error ? reason.message : "Save failed", "error"); }
+  });
+}
+
+function openTransferModal(existing?: FundTransfer) {
+  const active = payload!.people.filter((person) => person.active || person.id === existing?.fromPersonId || person.id === existing?.toPersonId);
+  const optionList = (selected: string | undefined) => `<option value="">Select person</option>${active.map((person) => `<option value="${person.id}" ${person.id === selected ? "selected" : ""}>${esc(person.name)}${person.role ? ` (${esc(person.role)})` : ""}</option>`).join("")}`;
+  openModal(`
+    <div class="modal-head"><div><p class="eyebrow">CASH FLOW</p><h3>${existing ? "Edit transfer" : "New transfer"}</h3></div><button class="icon-button" data-action="close-modal">?</button></div>
+    <form id="transfer-form" class="form-grid">
+      <label>From<select name="fromPersonId" required>${optionList(existing?.fromPersonId)}</select></label>
+      <label>To<select name="toPersonId" required>${optionList(existing?.toPersonId)}</select></label>
+      <label>Amount<input name="amount" type="number" min="1" step="1" required value="${existing?.amount ?? ""}" /></label>
+      <label>Date<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
+      <label>Payment method<select name="paymentMethod"><option value="">Unspecified</option>${["????", "??", "???", "????"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
+      <label>Status<select name="status"><option value="posted" ${existing?.status !== "pending" && existing?.status !== "void" ? "selected" : ""}>Completed</option><option value="pending" ${existing?.status === "pending" ? "selected" : ""}>Pending</option><option value="void" ${existing?.status === "void" ? "selected" : ""}>Void</option></select></label>
+      <label class="full">Note<textarea name="note" maxlength="500">${esc(existing?.note ?? "")}</textarea></label>
+      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">Cancel</button><button class="primary" type="submit">Save transfer</button></div>
+    </form>`);
+  document.querySelector<HTMLFormElement>("#transfer-form")!.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget as HTMLFormElement);
+    try {
+      await saveTransfer(currentProjectId(), { fromPersonId: String(form.get("fromPersonId")), toPersonId: String(form.get("toPersonId")), amount: Number(form.get("amount")), occurredOn: String(form.get("occurredOn")), status: String(form.get("status")) as FundTransfer["status"], paymentMethod: String(form.get("paymentMethod")), note: String(form.get("note")).trim() }, existing?.id);
+      document.querySelector(".modal-backdrop")?.remove();
+      await refresh();
+      toast("Saved");
+    } catch (reason) { toast(reason instanceof Error ? reason.message : "Save failed", "error"); }
   });
 }
 
@@ -767,6 +885,22 @@ function bindCommon() {
       } catch (reason) {
         toast(reason instanceof Error ? reason.message : "刪除失敗", "error");
       }
+    }
+    if (action === "export-cashflow") {
+      try { await downloadCashflowCsv(currentProjectId(), payload!.project.name); }
+      catch (reason) { toast(reason instanceof Error ? reason.message : "Download failed", "error"); }
+    }
+    if (action === "new-person") openPersonModal();
+    if (action === "edit-person") openPersonModal(payload!.people.find((person) => person.id === button.dataset.id));
+    if (action === "delete-person" && confirm("Delete this person? Referenced people can be archived instead.")) {
+      try { await deletePerson(currentProjectId(), button.dataset.id!); await refresh(); toast("Deleted"); }
+      catch (reason) { toast(reason instanceof Error ? reason.message : "Delete failed", "error"); }
+    }
+    if (action === "new-transfer") openTransferModal();
+    if (action === "edit-transfer") openTransferModal(payload!.transfers.find((transfer) => transfer.id === button.dataset.id));
+    if (action === "delete-transfer" && confirm("Delete this transfer?")) {
+      try { await deleteTransfer(currentProjectId(), button.dataset.id!); await refresh(); toast("Deleted"); }
+      catch (reason) { toast(reason instanceof Error ? reason.message : "Delete failed", "error"); }
     }
   }));
 }

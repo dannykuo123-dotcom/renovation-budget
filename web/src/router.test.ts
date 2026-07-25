@@ -20,3 +20,7 @@ describe("project hash routes", () => {
     });
   });
 });
+
+  it("supports the cashflow page", () => {
+    expect(parseRoute(projectRoute("abc", "cashflow"))).toEqual({ kind: "project", projectId: "abc", view: "cashflow" });
+  });

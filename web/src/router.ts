@@ -1,10 +1,10 @@
-export type ProjectView = "dashboard" | "budget" | "expenses" | "funding" | "settings";
+export type ProjectView = "dashboard" | "budget" | "expenses" | "funding" | "cashflow" | "settings";
 
 export type AppRoute =
   | { kind: "projects" }
   | { kind: "project"; projectId: string; view: ProjectView };
 
-const views: ProjectView[] = ["dashboard", "budget", "expenses", "funding", "settings"];
+const views: ProjectView[] = ["dashboard", "budget", "expenses", "funding", "cashflow", "settings"];
 
 export function parseRoute(hash: string): AppRoute {
   const path = hash.replace(/^#\/?/, "");

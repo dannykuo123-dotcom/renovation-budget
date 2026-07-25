@@ -8,6 +8,9 @@ import type {
   Project,
   ProjectStatus,
   ProjectSummary,
+  FundTransfer,
+  Person,
+  TransferStatus,
 } from "./types";
 
 const configuredBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "");
@@ -29,6 +32,7 @@ export interface EntryInput {
   status: EntryStatus;
   refundOfEntryId: string | null;
   description: string;
+  personId: string | null;
   amount: number;
   occurredOn: string;
   categoryId: string | null;
@@ -42,6 +46,23 @@ export interface CategoryInput {
   plannedAmount: number;
   color: string;
   items: Array<Pick<Category["items"][number], "name" | "plannedAmount">>;
+}
+
+export interface PersonInput {
+  name: string;
+  role: string;
+  note: string;
+  active: boolean;
+}
+
+export interface TransferInput {
+  fromPersonId: string;
+  toPersonId: string;
+  amount: number;
+  occurredOn: string;
+  status: TransferStatus;
+  paymentMethod: string;
+  note: string;
 }
 
 export class ApiError extends Error {
@@ -114,7 +135,7 @@ export async function createProject(input: ProjectInput): Promise<Project> {
       updatedAt: timestamp,
     };
     demoProjects.push(project);
-    demoDashboards.set(project.id, { project, categories: [], entries: [] });
+    demoDashboards.set(project.id, { project, categories: [], entries: [], people: [], transfers: [] });
     return clone(project);
   }
   return request<Project>("/api/projects", { method: "POST", body: JSON.stringify(input) });
@@ -210,6 +231,77 @@ export async function deleteCategory(projectId: string, categoryId: string): Pro
   await request<void>(`/api/projects/${projectId}/categories/${categoryId}`, { method: "DELETE" });
 }
 
+export async function savePerson(projectId: string, input: PersonInput, personId?: string): Promise<Person> {
+  if (isDemoMode) {
+    const dashboard = demoDashboards.get(projectId)!;
+    const duplicate = dashboard.people.find((person) => person.name.localeCompare(input.name, "zh-Hant", { sensitivity: "accent" }) === 0 && person.id !== personId);
+    if (duplicate) throw new Error("????????");
+    if (personId) {
+      const person = dashboard.people.find((item) => item.id === personId);
+      if (!person) throw new Error("?????");
+      Object.assign(person, input, { updatedAt: now() });
+      touchDemo(projectId);
+      return clone(person);
+    }
+    const timestamp = now();
+    const person: Person = { id: crypto.randomUUID(), ...input, createdAt: timestamp, updatedAt: timestamp };
+    dashboard.people.push(person);
+    touchDemo(projectId);
+    return clone(person);
+  }
+  const path = `/api/projects/${projectId}/people${personId ? `/${personId}` : ""}`;
+  return request<Person>(path, { method: personId ? "PATCH" : "POST", body: JSON.stringify(input) });
+}
+
+export async function deletePerson(projectId: string, personId: string): Promise<void> {
+  if (isDemoMode) {
+    const dashboard = demoDashboards.get(projectId)!;
+    if (dashboard.entries.some((entry) => entry.personId === personId) ||
+      dashboard.transfers.some((transfer) => transfer.fromPersonId === personId || transfer.toPersonId === personId)) {
+      throw new Error("???????????");
+    }
+    dashboard.people = dashboard.people.filter((person) => person.id !== personId);
+    touchDemo(projectId);
+    return;
+  }
+  await request<void>(`/api/projects/${projectId}/people/${personId}`, { method: "DELETE" });
+}
+
+export async function saveTransfer(projectId: string, input: TransferInput, transferId?: string): Promise<FundTransfer> {
+  if (isDemoMode) {
+    const dashboard = demoDashboards.get(projectId)!;
+    const validPeople = new Set(dashboard.people.filter((person) => person.active).map((person) => person.id));
+    if (input.fromPersonId === input.toPersonId || !validPeople.has(input.fromPersonId) || !validPeople.has(input.toPersonId)) {
+      throw new Error("???????????");
+    }
+    if (transferId) {
+      const transfer = dashboard.transfers.find((item) => item.id === transferId);
+      if (!transfer) throw new Error("?????????");
+      Object.assign(transfer, input, { updatedAt: now() });
+      touchDemo(projectId);
+      return clone(transfer);
+    }
+    const timestamp = now();
+    const transfer: FundTransfer = { id: crypto.randomUUID(), ...input, createdAt: timestamp, updatedAt: timestamp };
+    dashboard.transfers.unshift(transfer);
+    touchDemo(projectId);
+    return clone(transfer);
+  }
+  const path = `/api/projects/${projectId}/transfers${transferId ? `/${transferId}` : ""}`;
+  return request<FundTransfer>(path, { method: transferId ? "PATCH" : "POST", body: JSON.stringify(input) });
+}
+
+export async function deleteTransfer(projectId: string, transferId: string): Promise<void> {
+  if (isDemoMode) {
+    const dashboard = demoDashboards.get(projectId)!;
+    dashboard.transfers = dashboard.transfers.filter((item) => item.id !== transferId);
+    touchDemo(projectId);
+    return;
+  }
+  await request<void>(`/api/projects/${projectId}/transfers/${transferId}`, { method: "DELETE" });
+}
+
+
 export async function saveEntry(
   projectId: string,
   input: EntryInput,
@@ -217,14 +309,24 @@ export async function saveEntry(
 ): Promise<LedgerEntry> {
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;
+    let resolved = input;
+    if (input.kind === "refund") {
+      const source = dashboard.entries.find((entry) => entry.id === input.refundOfEntryId);
+      if (!source?.personId) throw new Error("Original expense needs a person");
+      resolved = { ...input, personId: source.personId, counterparty: source.counterparty };
+    } else {
+      const person = dashboard.people.find((item) => item.id === input.personId && item.active);
+      if (!person) throw new Error("Please select an active person");
+      resolved = { ...input, personId: person.id, counterparty: person.name };
+    }
     if (entryId) {
       const item = dashboard.entries.find((entry) => entry.id === entryId)!;
-      Object.assign(item, input, { updatedAt: now() });
+      Object.assign(item, resolved, { updatedAt: now() });
       touchDemo(projectId);
       return clone(item);
     }
     const item: LedgerEntry = {
-      ...input,
+      ...resolved,
       id: crypto.randomUUID(),
       attachments: [],
       createdAt: now(),
@@ -298,6 +400,46 @@ export async function downloadProjectCsv(projectId: string, projectName: string)
   link.click();
   URL.revokeObjectURL(url);
 }
+export async function downloadCashflowCsv(projectId: string, projectName: string): Promise<void> {
+  if (isDemoMode) {
+    const dashboard = demoDashboards.get(projectId)!;
+    const person = (id: string | null) => dashboard.people.find((item) => item.id === id);
+    const entryRows = dashboard.entries.filter((entry) => entry.personId).map((entry) => {
+      const related = person(entry.personId);
+      const outgoing = entry.kind !== "expense";
+      return [
+        entry.occurredOn, entry.kind,
+        outgoing ? related?.name ?? entry.counterparty : "????",
+        outgoing ? related?.role ?? "" : "",
+        outgoing ? "????" : related?.name ?? entry.counterparty,
+        outgoing ? "" : related?.role ?? "",
+        entry.status, String(entry.amount), entry.paymentMethod, entry.note,
+      ];
+    });
+    const transferRows = dashboard.transfers.map((transfer) => {
+      const from = person(transfer.fromPersonId);
+      const to = person(transfer.toPersonId);
+      return [transfer.occurredOn, "transfer", from?.name ?? "", from?.role ?? "", to?.name ?? "", to?.role ?? "", transfer.status, String(transfer.amount), transfer.paymentMethod, transfer.note];
+    });
+    saveCsv([["??", "????", "???", "?????", "???", "?????", "??", "??", "????", "??"], ...entryRows, ...transferRows], `${projectName}-???`);
+    return;
+  }
+  const response = await fetch(`${configuredBase}/api/projects/${projectId}/cashflow/export.csv`, {
+    headers: { Authorization: `Bearer ${session.token}` },
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: "Download failed" }));
+    throw new ApiError(error.error || "Download failed", response.status);
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${projectName}-???.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+
 
 function saveCsv(rows: string[][], projectName: string) {
   const csv = "\uFEFF" + rows

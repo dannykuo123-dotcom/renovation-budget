@@ -8,6 +8,7 @@ export interface Env {
 
 type EntryKind = "income" | "expense" | "refund";
 type EntryStatus = "posted" | "pending" | "void";
+type TransferStatus = "posted" | "pending" | "void";
 type ProjectStatus = "active" | "completed" | "archived";
 type EntryInput = {
   kind: EntryKind;
@@ -17,7 +18,23 @@ type EntryInput = {
   amount: number;
   occurredOn: string;
   categoryId: string | null;
+  personId: string | null;
   counterparty: string;
+  paymentMethod: string;
+  note: string;
+};
+type PersonInput = {
+  name: string;
+  role: string;
+  note: string;
+  active: boolean;
+};
+type TransferInput = {
+  fromPersonId: string;
+  toPersonId: string;
+  amount: number;
+  occurredOn: string;
+  status: TransferStatus;
   paymentMethod: string;
   note: string;
 };
@@ -170,12 +187,46 @@ function parseEntry(input: Record<string, unknown>): EntryInput {
     amount,
     occurredOn,
     categoryId: typeof input.categoryId === "string" && input.categoryId ? input.categoryId : null,
+    personId: text(input.personId, 80) || null,
     counterparty: text(input.counterparty, 60),
     paymentMethod: text(input.paymentMethod, 30),
     note: text(input.note, 500),
   };
 }
 
+function parsePerson(input: Record<string, unknown>): PersonInput {
+  const name = text(input.name, 60);
+  if (!name) throw new Error("???????");
+  return {
+    name,
+    role: text(input.role, 40),
+    note: text(input.note, 500),
+    active: input.active !== false,
+  };
+}
+
+function parseTransfer(input: Record<string, unknown>): TransferInput {
+  const amount = parseMoney(input.amount);
+  const occurredOn = text(input.occurredOn, 10);
+  const status = String(input.status);
+  const fromPersonId = text(input.fromPersonId, 80);
+  const toPersonId = text(input.toPersonId, 80);
+  if (!amount || !/^\d{4}-\d{2}-\d{2}$/.test(occurredOn) || !["posted", "pending", "void"].includes(status)) {
+    throw new Error("??????????????");
+  }
+  if (!fromPersonId || !toPersonId || fromPersonId === toPersonId) {
+    throw new Error("?????????????");
+  }
+  return {
+    fromPersonId,
+    toPersonId,
+    amount,
+    occurredOn,
+    status: status as TransferStatus,
+    paymentMethod: text(input.paymentMethod, 30),
+    note: text(input.note, 500),
+  };
+}
 async function rateLimit(request: Request, env: Env): Promise<boolean> {
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
   const ipHash = await digest(`${ip}:${env.SESSION_SIGNING_SECRET}`);
@@ -297,6 +348,7 @@ const mapEntry = (row: Record<string, unknown>, attachments: Record<string, unkn
   amount: row.amount,
   occurredOn: row.occurred_on,
   categoryId: row.category_id,
+  personId: row.person_id,
   counterparty: row.counterparty,
   paymentMethod: row.payment_method,
   note: row.note,
@@ -305,6 +357,50 @@ const mapEntry = (row: Record<string, unknown>, attachments: Record<string, unkn
   attachments: attachments.filter((attachment) => attachment.entry_id === row.id).map(mapAttachment),
 });
 
+const mapPerson = (row: Record<string, unknown>) => ({
+  id: row.id,
+  name: row.name,
+  role: row.role,
+  note: row.note,
+  active: Boolean(row.active),
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const mapTransfer = (row: Record<string, unknown>) => ({
+  id: row.id,
+  fromPersonId: row.from_person_id,
+  toPersonId: row.to_person_id,
+  amount: row.amount,
+  occurredOn: row.occurred_on,
+  status: row.status,
+  paymentMethod: row.payment_method,
+  note: row.note,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+async function resolveEntryPerson(env: Env, projectId: string, input: EntryInput): Promise<EntryInput> {
+  if (input.kind === "refund") return input;
+  if (!input.personId) throw new Error("???????");
+  const person = await env.DB.prepare(
+    "SELECT id, name FROM people WHERE id = ? AND project_id = ? AND active = 1",
+  ).bind(input.personId, projectId).first<{ id: string; name: string }>();
+  if (!person) throw new Error("???????????");
+  return { ...input, personId: person.id, counterparty: person.name };
+}
+
+async function resolveTransferPeople(
+  env: Env,
+  projectId: string,
+  input: TransferInput,
+): Promise<TransferInput> {
+  const result = await env.DB.prepare(
+    "SELECT id FROM people WHERE project_id = ? AND active = 1 AND id IN (?, ?)",
+  ).bind(projectId, input.fromPersonId, input.toPersonId).all<{ id: string }>();
+  if (result.results.length !== 2) throw new Error("??????????????????");
+  return input;
+}
 async function validateRefundSource(
   env: Env,
   projectId: string,
@@ -313,10 +409,10 @@ async function validateRefundSource(
 ): Promise<EntryInput> {
   if (input.kind !== "refund") return input;
   const source = await env.DB.prepare(`
-    SELECT id, amount, category_id
+    SELECT id, amount, category_id, person_id, counterparty
     FROM ledger_entries
     WHERE id = ? AND project_id = ? AND kind = 'expense' AND status = 'posted'
-  `).bind(input.refundOfEntryId, projectId).first<{ id: string; amount: number; category_id: string | null }>();
+  `).bind(input.refundOfEntryId, projectId).first<{ id: string; amount: number; category_id: string | null; person_id: string | null; counterparty: string }>();
   if (!source) throw new Error("退款只能連結同工程案的一筆已付款支出");
   const reserved = await env.DB.prepare(`
     SELECT COALESCE(SUM(amount), 0) AS amount
@@ -327,7 +423,8 @@ async function validateRefundSource(
   if ((reserved?.amount ?? 0) + input.amount > source.amount) {
     throw new Error("退款金額加上既有退款不可超過原始支出金額");
   }
-  return { ...input, categoryId: source.category_id };
+  if (!source.person_id) throw new Error("Original expense must have a person");
+  return { ...input, categoryId: source.category_id, personId: source.person_id, counterparty: source.counterparty };
 }
 
 async function validateExpenseChange(
@@ -409,7 +506,7 @@ async function setProjectStatus(env: Env, projectId: string, status: ProjectStat
 }
 
 async function dashboard(env: Env, projectId: string): Promise<Response> {
-  const [project, categoryResult, itemResult, entryResult, attachmentResult] = await Promise.all([
+  const [project, categoryResult, itemResult, entryResult, attachmentResult, peopleResult, transferResult] = await Promise.all([
     findProject(projectId, env),
     env.DB.prepare(
       "SELECT id, name, planned_amount, color, sort_order FROM budget_categories WHERE project_id = ? ORDER BY sort_order, name",
@@ -423,12 +520,20 @@ async function dashboard(env: Env, projectId: string): Promise<Response> {
     env.DB.prepare(
       "SELECT a.id, a.entry_id, a.filename, a.content_type, a.size, a.created_at FROM attachments a JOIN ledger_entries e ON e.id = a.entry_id WHERE e.project_id = ?",
     ).bind(projectId).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      "SELECT * FROM people WHERE project_id = ? ORDER BY active DESC, name",
+    ).bind(projectId).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      "SELECT * FROM fund_transfers WHERE project_id = ? ORDER BY occurred_on DESC, created_at DESC",
+    ).bind(projectId).all<Record<string, unknown>>(),
   ]);
   if (!project) return json({ error: "找不到此工程案" }, { status: 404 });
   return json({
     project: mapProject(project),
     categories: categoryResult.results.map((category) => mapCategory(category, itemResult.results)),
     entries: entryResult.results.map((entry) => mapEntry(entry, attachmentResult.results)),
+    people: peopleResult.results.map(mapPerson),
+    transfers: transferResult.results.map(mapTransfer),
   });
 }
 
@@ -507,6 +612,103 @@ async function categories(request: Request, env: Env, projectId: string, categor
   return json({ error: "不支援的方法" }, { status: 405 });
 }
 
+async function people(request: Request, env: Env, projectId: string, personId?: string): Promise<Response> {
+  if (!await findProject(projectId, env)) return json({ error: "Project not found" }, { status: 404 });
+  if (!personId && request.method === "GET") {
+    const result = await env.DB.prepare(
+      "SELECT * FROM people WHERE project_id = ? ORDER BY active DESC, name",
+    ).bind(projectId).all<Record<string, unknown>>();
+    return json(result.results.map(mapPerson));
+  }
+  if (!personId && request.method === "POST") {
+    const input = parsePerson(await requireJson(request));
+    const duplicate = await env.DB.prepare(
+      "SELECT id FROM people WHERE project_id = ? AND name = ? COLLATE NOCASE",
+    ).bind(projectId, input.name).first();
+    if (duplicate) return json({ error: "A person with this name already exists" }, { status: 409 });
+    const id = newId();
+    const timestamp = now();
+    await env.DB.prepare(
+      "INSERT INTO people (id, project_id, name, role, note, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    ).bind(id, projectId, input.name, input.role, input.note, input.active ? 1 : 0, timestamp, timestamp).run();
+    await touchProject(projectId, env);
+    const result = await env.DB.prepare("SELECT * FROM people WHERE id = ?").bind(id).first<Record<string, unknown>>();
+    return json(mapPerson(result!), { status: 201 });
+  }
+  if (!personId) return json({ error: "Person operation not found" }, { status: 404 });
+  const existing = await env.DB.prepare(
+    "SELECT * FROM people WHERE id = ? AND project_id = ?",
+  ).bind(personId, projectId).first<Record<string, unknown>>();
+  if (!existing) return json({ error: "Person not found" }, { status: 404 });
+  if (request.method === "PATCH") {
+    const input = parsePerson(await requireJson(request));
+    const duplicate = await env.DB.prepare(
+      "SELECT id FROM people WHERE project_id = ? AND name = ? COLLATE NOCASE AND id != ?",
+    ).bind(projectId, input.name, personId).first();
+    if (duplicate) return json({ error: "A person with this name already exists" }, { status: 409 });
+    const timestamp = now();
+    await env.DB.prepare(
+      "UPDATE people SET name = ?, role = ?, note = ?, active = ?, updated_at = ? WHERE id = ? AND project_id = ?",
+    ).bind(input.name, input.role, input.note, input.active ? 1 : 0, timestamp, personId, projectId).run();
+    await touchProject(projectId, env);
+    const updated = await env.DB.prepare("SELECT * FROM people WHERE id = ?").bind(personId).first<Record<string, unknown>>();
+    return json(mapPerson(updated!));
+  }
+  if (request.method === "DELETE") {
+    const usage = await env.DB.prepare(
+      "SELECT (SELECT COUNT(*) FROM ledger_entries WHERE project_id = ? AND person_id = ?) + (SELECT COUNT(*) FROM fund_transfers WHERE project_id = ? AND (from_person_id = ? OR to_person_id = ?)) AS count",
+    ).bind(projectId, personId, projectId, personId, personId).first<{ count: number }>();
+    if ((usage?.count ?? 0) > 0) return json({ error: "Referenced people can only be archived" }, { status: 409 });
+    await env.DB.prepare("DELETE FROM people WHERE id = ? AND project_id = ?").bind(personId, projectId).run();
+    await touchProject(projectId, env);
+    return new Response(null, { status: 204 });
+  }
+  return json({ error: "Method not allowed" }, { status: 405 });
+}
+
+async function transfers(request: Request, env: Env, projectId: string, transferId?: string): Promise<Response> {
+  if (!await findProject(projectId, env)) return json({ error: "Project not found" }, { status: 404 });
+  if (!transferId && request.method === "GET") {
+    const result = await env.DB.prepare(
+      "SELECT * FROM fund_transfers WHERE project_id = ? ORDER BY occurred_on DESC, created_at DESC",
+    ).bind(projectId).all<Record<string, unknown>>();
+    return json(result.results.map(mapTransfer));
+  }
+  if (!transferId && request.method === "POST") {
+    const input = await resolveTransferPeople(env, projectId, parseTransfer(await requireJson(request)));
+    const id = newId();
+    const timestamp = now();
+    await env.DB.prepare(
+      "INSERT INTO fund_transfers (id, project_id, from_person_id, to_person_id, amount, occurred_on, status, payment_method, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).bind(id, projectId, input.fromPersonId, input.toPersonId, input.amount, input.occurredOn, input.status, input.paymentMethod, input.note, timestamp, timestamp).run();
+    await touchProject(projectId, env);
+    const result = await env.DB.prepare("SELECT * FROM fund_transfers WHERE id = ?").bind(id).first<Record<string, unknown>>();
+    return json(mapTransfer(result!), { status: 201 });
+  }
+  if (!transferId) return json({ error: "Transfer operation not found" }, { status: 404 });
+  const existing = await env.DB.prepare(
+    "SELECT id FROM fund_transfers WHERE id = ? AND project_id = ?",
+  ).bind(transferId, projectId).first();
+  if (!existing) return json({ error: "Transfer not found" }, { status: 404 });
+  if (request.method === "PATCH") {
+    const input = await resolveTransferPeople(env, projectId, parseTransfer(await requireJson(request)));
+    const timestamp = now();
+    await env.DB.prepare(
+      "UPDATE fund_transfers SET from_person_id = ?, to_person_id = ?, amount = ?, occurred_on = ?, status = ?, payment_method = ?, note = ?, updated_at = ? WHERE id = ? AND project_id = ?",
+    ).bind(input.fromPersonId, input.toPersonId, input.amount, input.occurredOn, input.status, input.paymentMethod, input.note, timestamp, transferId, projectId).run();
+    await touchProject(projectId, env);
+    const updated = await env.DB.prepare("SELECT * FROM fund_transfers WHERE id = ?").bind(transferId).first<Record<string, unknown>>();
+    return json(mapTransfer(updated!));
+  }
+  if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM fund_transfers WHERE id = ? AND project_id = ?").bind(transferId, projectId).run();
+    await touchProject(projectId, env);
+    return new Response(null, { status: 204 });
+  }
+  return json({ error: "Method not allowed" }, { status: 405 });
+}
+
+
 async function entries(request: Request, env: Env, projectId: string, entryId?: string): Promise<Response> {
   if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   if (!entryId && request.method === "GET") {
@@ -523,6 +725,7 @@ async function entries(request: Request, env: Env, projectId: string, entryId?: 
   if (!entryId && request.method === "POST") {
     let input = parseEntry(await requireJson(request));
     input = await validateRefundSource(env, projectId, input);
+    input = await resolveEntryPerson(env, projectId, input);
     if (input.categoryId) {
       const exists = await env.DB.prepare(
         "SELECT id FROM budget_categories WHERE id = ? AND project_id = ?",
@@ -533,11 +736,11 @@ async function entries(request: Request, env: Env, projectId: string, entryId?: 
     const timestamp = now();
     await env.DB.prepare(`
       INSERT INTO ledger_entries
-        (id, project_id, kind, status, refund_of_entry_id, description, amount, occurred_on, category_id, counterparty, payment_method, note, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, project_id, kind, status, refund_of_entry_id, description, amount, occurred_on, category_id, person_id, counterparty, payment_method, note, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       id, projectId, input.kind, input.status, input.refundOfEntryId, input.description, input.amount, input.occurredOn,
-      input.categoryId, input.counterparty, input.paymentMethod, input.note, timestamp, timestamp,
+      input.categoryId, input.personId, input.counterparty, input.paymentMethod, input.note, timestamp, timestamp,
     ).run();
     await touchProject(projectId, env);
     return json({ id, ...input, attachments: [], createdAt: timestamp, updatedAt: timestamp }, { status: 201 });
@@ -550,6 +753,7 @@ async function entries(request: Request, env: Env, projectId: string, entryId?: 
   if (request.method === "PATCH") {
     let input = parseEntry(await requireJson(request));
     input = await validateRefundSource(env, projectId, input, entryId);
+    input = await resolveEntryPerson(env, projectId, input);
     if (existing.kind === "expense") await validateExpenseChange(env, projectId, entryId, input);
     if (input.categoryId) {
       const category = await env.DB.prepare(
@@ -561,12 +765,17 @@ async function entries(request: Request, env: Env, projectId: string, entryId?: 
     await env.DB.prepare(`
       UPDATE ledger_entries SET
         kind = ?, status = ?, refund_of_entry_id = ?, description = ?, amount = ?, occurred_on = ?, category_id = ?,
-        counterparty = ?, payment_method = ?, note = ?, updated_at = ?
+        person_id = ?, counterparty = ?, payment_method = ?, note = ?, updated_at = ?
       WHERE id = ? AND project_id = ?
     `).bind(
       input.kind, input.status, input.refundOfEntryId, input.description, input.amount, input.occurredOn, input.categoryId,
-      input.counterparty, input.paymentMethod, input.note, timestamp, entryId, projectId,
+      input.personId, input.counterparty, input.paymentMethod, input.note, timestamp, entryId, projectId,
     ).run();
+    if (input.kind === "expense") {
+      await env.DB.prepare(
+        "UPDATE ledger_entries SET person_id = ?, counterparty = ?, updated_at = ? WHERE project_id = ? AND refund_of_entry_id = ?",
+      ).bind(input.personId, input.counterparty, timestamp, projectId, entryId).run();
+    }
     await touchProject(projectId, env);
     const attachments = await env.DB.prepare(
       "SELECT id, entry_id, filename, content_type, size, created_at FROM attachments WHERE entry_id = ?",
@@ -693,6 +902,44 @@ async function exportCsv(env: Env, projectId: string): Promise<Response> {
   });
 }
 
+async function exportCashflowCsv(env: Env, projectId: string): Promise<Response> {
+  if (!await findProject(projectId, env)) return json({ error: "Project not found" }, { status: 404 });
+  const result = await env.DB.prepare(`
+    SELECT e.occurred_on, e.kind AS source_type,
+      CASE WHEN e.kind = 'expense' THEN '????' ELSE COALESCE(p.name, '???') END AS from_name,
+      CASE WHEN e.kind = 'expense' THEN '???' ELSE '????' END AS to_name,
+      CASE WHEN e.kind = 'expense' THEN '' ELSE COALESCE(p.role, '') END AS from_role,
+      CASE WHEN e.kind = 'expense' THEN COALESCE(p.role, '') ELSE '' END AS to_role,
+      e.status, e.amount, e.payment_method, e.note
+    FROM ledger_entries e
+    LEFT JOIN people p ON p.id = e.person_id
+    WHERE e.project_id = ? AND e.person_id IS NOT NULL
+    UNION ALL
+    SELECT t.occurred_on, 'transfer' AS source_type,
+      sender.name AS from_name, receiver.name AS to_name,
+      sender.role AS from_role, receiver.role AS to_role,
+      t.status, t.amount, t.payment_method, t.note
+    FROM fund_transfers t
+    JOIN people sender ON sender.id = t.from_person_id
+    JOIN people receiver ON receiver.id = t.to_person_id
+    WHERE t.project_id = ?
+    ORDER BY occurred_on DESC
+  `).bind(projectId, projectId).all<Record<string, unknown>>();
+  const headers = ["??", "????", "???", "?????", "???", "?????", "??", "??", "????", "??"];
+  const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const csv = "\uFEFF" + [headers, ...result.results.map((row) => [
+    row.occurred_on, row.source_type, row.from_name, row.from_role, row.to_name, row.to_role,
+    row.status, row.amount, row.payment_method, row.note,
+  ])].map((row) => row.map(quote).join(",")).join("\n");
+  return new Response(csv, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": "attachment; filename*=UTF-8''rainbow-project-cashflow.csv",
+    },
+  });
+}
+
+
 async function handle(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204 });
@@ -726,10 +973,16 @@ async function handle(request: Request, env: Env): Promise<Response> {
   }
   const dashboardMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/dashboard$/);
   if (dashboardMatch && request.method === "GET") return dashboard(env, dashboardMatch[1]);
+  const peopleMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/people(?:\/([^/]+))?$/);
+  if (peopleMatch) return people(request, env, peopleMatch[1], peopleMatch[2]);
+  const transferMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/transfers(?:\/([^/]+))?$/);
+  if (transferMatch) return transfers(request, env, transferMatch[1], transferMatch[2]);
   const categoryMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/categories(?:\/([^/]+))?$/);
   if (categoryMatch) return categories(request, env, categoryMatch[1], categoryMatch[2]);
   const uploadMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/entries\/([^/]+)\/attachments$/);
   if (uploadMatch) return attachmentRoutes(request, env, uploadMatch[1], uploadMatch[2]);
+  const cashflowExportMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/cashflow\/export\.csv$/);
+  if (cashflowExportMatch && request.method === "GET") return exportCashflowCsv(env, cashflowExportMatch[1]);
   const entryMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/entries(?:\/([^/]+))?$/);
   if (entryMatch) return entries(request, env, entryMatch[1], entryMatch[2]);
   const attachmentMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/attachments\/([^/]+)$/);
