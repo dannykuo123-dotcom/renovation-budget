@@ -545,10 +545,7 @@ function cashflowPaymentLabel(paymentMethod: string): string {
 }
 
 function renderCashflow() {
-  const totals = calculateTotals(payload!.categories, payload!.entries);
   const summaries = calculatePersonCashflows(payload!.people, payload!.entries, payload!.transfers);
-  const projectPayable = summaries.filter((summary) => summary.net > 0).reduce((sum, summary) => sum + summary.net, 0);
-  const projectReceivable = summaries.filter((summary) => summary.net < 0).reduce((sum, summary) => sum + Math.abs(summary.net), 0);
   const entryFlows = payload!.entries.filter((entry) => entry.personId).map((entry) => ({
     id: entry.id,
     source: entry.kind as EntryKind | "transfer",
@@ -587,11 +584,6 @@ function renderCashflow() {
     <section class="cashflow-intro">
       <div><p class="eyebrow">PROJECT CASH FLOW</p><h3>工程帳戶與人員往來</h3><p>正數代表工程尚應付給該人員；負數代表該人員尚應付回工程。待處理款項不會計入餘額。</p></div>
       <button class="primary" data-action="new-transfer">↔ 新增資金移轉</button>
-    </section>
-    <section class="cashflow-summary-cards">
-      <article><small>工程帳戶餘額</small><strong class="${totals.cashBalance < 0 ? "negative" : ""}">${formatMoney(totals.cashBalance)}</strong><span>已入帳 ${formatMoney(totals.received)} · 已支出 ${formatMoney(totals.spent)}</span></article>
-      <article><small>工程應付人員</small><strong>${formatMoney(projectPayable)}</strong><span>人員已收款多於已付款</span></article>
-      <article><small>工程應收人員</small><strong>${formatMoney(projectReceivable)}</strong><span>人員已付款多於已收款</span></article>
     </section>
     <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>人員</th><th>已收款</th><th>已付款</th><th>待收款</th><th>待付款</th><th>與工程往來餘額</th><th></th></tr></thead><tbody>${summaries.map((summary) => {
       const label = summary.net >= 0 ? "工程應付" : "工程應收";
