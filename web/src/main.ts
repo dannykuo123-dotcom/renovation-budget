@@ -798,7 +798,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     ? `<option value="posted" selected>已入帳</option>`
     : kindInput.value === "refund"
       ? `<option value="posted" ${selected === "posted" ? "selected" : ""}>已退款</option><option value="pending" ${selected === "pending" ? "selected" : ""}>待退款</option>`
-      : `<option value="posted" ${selected === "posted" ? "selected" : ""}>已付款</option><option value="pending" ${selected === "pending" ? "selected" : ""}>待付款</option>`;
+      : `<option value="posted" selected>已付款</option>`;
   const applySource = () => {
     const source = payload!.entries.find((entry) => entry.id === sourceInput.value);
     if (!source) return;
@@ -810,7 +810,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     amountInput.max = String(source.amount - refundReserved(source.id, existing?.id));
   };
   const sync = () => {
-    const selected = statusInput.value || (existing?.status === "pending" ? "pending" : "posted");
+    const selected = kindInput.value === "expense" ? "posted" : (statusInput.value || (existing?.status === "pending" ? "pending" : "posted"));
     statusInput.innerHTML = statusOptions(selected);
     const isRefundKind = kindInput.value === "refund";
     sourceField.hidden = !isRefundKind;
@@ -822,7 +822,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       ? "退款必須連結原始已付款支出；只有選擇「已退款」後，金額才會加回可用資金與預算餘額。"
       : kindInput.value === "income"
         ? "已入帳的資金會直接增加可用資金。"
-        : "支出只可記錄已付款或待付款；退貨請另建一筆退款紀錄。";
+        : "支出一律記為已付款；退貨請另建一筆退款紀錄。";
     if (isRefundKind && sourceInput.value) applySource();
     if (!isRefundKind) amountInput.removeAttribute("max");
   };

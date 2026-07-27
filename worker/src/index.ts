@@ -176,6 +176,7 @@ function parseEntry(input: Record<string, unknown>): EntryInput {
   const description = text(input.description, 80);
   if (!description) throw new Error("請輸入品項或用途");
   if (kind === "income" && status !== "posted") throw new Error("資金入帳只能標記為已入帳");
+  if (kind === "expense" && status !== "posted") throw new Error("支出只能標記為已付款");
   const refundOfEntryId = text(input.refundOfEntryId, 80) || null;
   if (kind === "refund" && !refundOfEntryId) throw new Error("請選擇原始支出紀錄");
   if (kind !== "refund" && refundOfEntryId) throw new Error("只有退款紀錄可以連結原始支出");

@@ -9,9 +9,9 @@ const entry = (kind: LedgerEntry["kind"], amount: number, status: LedgerEntry["s
 });
 
 describe("calculateTotals", () => {
-  it("separates incoming funds, paid expense, pending expense, and refunds", () => {
-    const totals = calculateTotals(categories, [entry("income", 150000), entry("expense", 40000), entry("expense", 10000, "pending"), entry("refund", 3000)]);
-    expect(totals).toEqual({ planned: 100000, received: 150000, spent: 37000, pending: 10000, returned: 3000, pendingRefund: 0, cashBalance: 113000, budgetRemaining: 63000 });
+  it("separates incoming funds, paid expenses, and refunds", () => {
+    const totals = calculateTotals(categories, [entry("income", 150000), entry("expense", 50000), entry("refund", 3000)]);
+    expect(totals).toEqual({ planned: 100000, received: 150000, spent: 47000, pending: 0, returned: 3000, pendingRefund: 0, cashBalance: 103000, budgetRemaining: 53000 });
   });
 
   it("returns a fully refunded expense to the available balance and budget", () => {
