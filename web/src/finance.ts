@@ -67,15 +67,24 @@ export function calculatePersonCashflows(
     let paid = 0;
     let pendingReceive = 0;
     let pendingPay = 0;
+    // Keep the project balance separate from the display columns. An expense is
+    // an engineering payment, even when it is associated with the payee.
+    let projectBalance = 0;
     for (const entry of entries) {
       if (entry.personId !== person.id || entry.status === "void") continue;
       if (entry.status === "pending") {
-        if (entry.kind === "expense") pendingReceive += entry.amount;
+        if (entry.kind === "expense") pendingPay += entry.amount;
         if (entry.kind === "refund") pendingPay += entry.amount;
         continue;
       }
-      if (entry.kind === "expense") received += entry.amount;
-      if (entry.kind === "income" || entry.kind === "refund") paid += entry.amount;
+      if (entry.kind === "expense") {
+        paid += entry.amount;
+        projectBalance += entry.amount;
+      }
+      if (entry.kind === "income" || entry.kind === "refund") {
+        paid += entry.amount;
+        projectBalance -= entry.amount;
+      }
     }
     for (const transfer of transfers) {
       if (transfer.status === "void") continue;
@@ -90,6 +99,6 @@ export function calculatePersonCashflows(
       if (isFrom) paid += transfer.amount;
       if (isTo) received += transfer.amount;
     }
-    return { person, received, paid, pendingReceive, pendingPay, net: received - paid };
+    return { person, received, paid, pendingReceive, pendingPay, net: projectBalance };
   }).sort((left, right) => right.net - left.net || left.person.name.localeCompare(right.person.name, "zh-Hant"));
 }

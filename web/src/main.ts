@@ -582,7 +582,7 @@ function renderCashflow() {
   const personOptions = `<option value="">全部人員</option>${payload!.people.map((person) => `<option value="${person.id}" ${cashflowPersonFilter === person.id ? "selected" : ""}>${esc(person.name)}</option>`).join("")}`;
   const overview = `
     <section class="cashflow-intro">
-      <div><p class="eyebrow">PROJECT CASH FLOW</p><h3>工程帳戶與人員往來</h3><p>正數代表工程尚應付給該人員；負數代表該人員尚應付回工程。待處理款項不會計入餘額。</p></div>
+      <div><p class="eyebrow">PROJECT CASH FLOW</p><h3>工程帳戶與人員往來</h3><p>工程支出列為已付款；已收款只計人員之間實際收到的資金移轉。正數代表工程尚應付給該人員，負數代表工程尚應收回。</p></div>
       <button class="primary" data-action="new-transfer">↔ 新增資金移轉</button>
     </section>
     <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>人員</th><th>已收款</th><th>已付款</th><th>待收款</th><th>待付款</th><th>與工程往來餘額</th><th></th></tr></thead><tbody>${summaries.map((summary) => {

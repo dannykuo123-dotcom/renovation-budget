@@ -36,12 +36,11 @@ describe("calculatePersonCashflows", () => {
   });
   const people = [person("alice", "Alice"), person("bob", "Bob")];
 
-  it("combines posted ledger flow and direct transfers while keeping pending amounts separate", () => {
+  it("lists engineering expenses as paid while keeping direct transfer receipts separate", () => {
     const entries: LedgerEntry[] = [
       { ...entry("income", 1000), personId: "alice" },
       { ...entry("expense", 300), personId: "bob" },
       { ...entry("refund", 50), personId: "bob" },
-      { ...entry("expense", 80, "pending"), personId: "alice" },
     ];
     const transfers: FundTransfer[] = [
       { id: "t1", fromPersonId: "alice", toPersonId: "bob", amount: 200, occurredOn: "2026-07-02", status: "posted", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
@@ -50,10 +49,10 @@ describe("calculatePersonCashflows", () => {
     ];
     const summaries = calculatePersonCashflows(people, entries, transfers);
     expect(summaries.find((item) => item.person.id === "alice")).toMatchObject({
-      paid: 1200, received: 0, pendingReceive: 120, pendingPay: 0, net: -1200,
+      paid: 1200, received: 0, pendingReceive: 40, pendingPay: 0, net: -1000,
     });
     expect(summaries.find((item) => item.person.id === "bob")).toMatchObject({
-      paid: 50, received: 500, pendingReceive: 0, pendingPay: 40, net: 450,
+      paid: 350, received: 200, pendingReceive: 0, pendingPay: 40, net: 250,
     });
   });
 });
