@@ -196,7 +196,7 @@ function parseEntry(input: Record<string, unknown>): EntryInput {
 
 function parsePerson(input: Record<string, unknown>): PersonInput {
   const name = text(input.name, 60);
-  if (!name) throw new Error("???????");
+  if (!name) throw new Error("請輸入人員姓名或名稱");
   return {
     name,
     role: text(input.role, 40),
@@ -212,10 +212,10 @@ function parseTransfer(input: Record<string, unknown>): TransferInput {
   const fromPersonId = text(input.fromPersonId, 80);
   const toPersonId = text(input.toPersonId, 80);
   if (!amount || !/^\d{4}-\d{2}-\d{2}$/.test(occurredOn) || !["posted", "pending", "void"].includes(status)) {
-    throw new Error("??????????????");
+    throw new Error("移轉金額、日期或狀態格式不正確");
   }
   if (!fromPersonId || !toPersonId || fromPersonId === toPersonId) {
-    throw new Error("?????????????");
+    throw new Error("請選擇不同的出款人與收款人");
   }
   return {
     fromPersonId,
@@ -382,11 +382,11 @@ const mapTransfer = (row: Record<string, unknown>) => ({
 
 async function resolveEntryPerson(env: Env, projectId: string, input: EntryInput): Promise<EntryInput> {
   if (input.kind === "refund") return input;
-  if (!input.personId) throw new Error("???????");
+  if (!input.personId) throw new Error("請選擇人員");
   const person = await env.DB.prepare(
     "SELECT id, name FROM people WHERE id = ? AND project_id = ? AND active = 1",
   ).bind(input.personId, projectId).first<{ id: string; name: string }>();
-  if (!person) throw new Error("???????????");
+  if (!person) throw new Error("請選擇啟用中的人員");
   return { ...input, personId: person.id, counterparty: person.name };
 }
 
@@ -398,7 +398,7 @@ async function resolveTransferPeople(
   const result = await env.DB.prepare(
     "SELECT id FROM people WHERE project_id = ? AND active = 1 AND id IN (?, ?)",
   ).bind(projectId, input.fromPersonId, input.toPersonId).all<{ id: string }>();
-  if (result.results.length !== 2) throw new Error("??????????????????");
+  if (result.results.length !== 2) throw new Error("出款人與收款人必須是同工程案的啟用人員");
   return input;
 }
 async function validateRefundSource(
@@ -423,7 +423,7 @@ async function validateRefundSource(
   if ((reserved?.amount ?? 0) + input.amount > source.amount) {
     throw new Error("退款金額加上既有退款不可超過原始支出金額");
   }
-  if (!source.person_id) throw new Error("Original expense must have a person");
+  if (!source.person_id) throw new Error("原始支出未指定人員，無法建立退款");
   return { ...input, categoryId: source.category_id, personId: source.person_id, counterparty: source.counterparty };
 }
 
@@ -613,7 +613,7 @@ async function categories(request: Request, env: Env, projectId: string, categor
 }
 
 async function people(request: Request, env: Env, projectId: string, personId?: string): Promise<Response> {
-  if (!await findProject(projectId, env)) return json({ error: "Project not found" }, { status: 404 });
+  if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   if (!personId && request.method === "GET") {
     const result = await env.DB.prepare(
       "SELECT * FROM people WHERE project_id = ? ORDER BY active DESC, name",
@@ -625,7 +625,7 @@ async function people(request: Request, env: Env, projectId: string, personId?: 
     const duplicate = await env.DB.prepare(
       "SELECT id FROM people WHERE project_id = ? AND name = ? COLLATE NOCASE",
     ).bind(projectId, input.name).first();
-    if (duplicate) return json({ error: "A person with this name already exists" }, { status: 409 });
+    if (duplicate) return json({ error: "已有相同名稱的人員" }, { status: 409 });
     const id = newId();
     const timestamp = now();
     await env.DB.prepare(
@@ -635,17 +635,17 @@ async function people(request: Request, env: Env, projectId: string, personId?: 
     const result = await env.DB.prepare("SELECT * FROM people WHERE id = ?").bind(id).first<Record<string, unknown>>();
     return json(mapPerson(result!), { status: 201 });
   }
-  if (!personId) return json({ error: "Person operation not found" }, { status: 404 });
+  if (!personId) return json({ error: "找不到人員操作" }, { status: 404 });
   const existing = await env.DB.prepare(
     "SELECT * FROM people WHERE id = ? AND project_id = ?",
   ).bind(personId, projectId).first<Record<string, unknown>>();
-  if (!existing) return json({ error: "Person not found" }, { status: 404 });
+  if (!existing) return json({ error: "找不到此人員" }, { status: 404 });
   if (request.method === "PATCH") {
     const input = parsePerson(await requireJson(request));
     const duplicate = await env.DB.prepare(
       "SELECT id FROM people WHERE project_id = ? AND name = ? COLLATE NOCASE AND id != ?",
     ).bind(projectId, input.name, personId).first();
-    if (duplicate) return json({ error: "A person with this name already exists" }, { status: 409 });
+    if (duplicate) return json({ error: "已有相同名稱的人員" }, { status: 409 });
     const timestamp = now();
     await env.DB.prepare(
       "UPDATE people SET name = ?, role = ?, note = ?, active = ?, updated_at = ? WHERE id = ? AND project_id = ?",
@@ -658,16 +658,16 @@ async function people(request: Request, env: Env, projectId: string, personId?: 
     const usage = await env.DB.prepare(
       "SELECT (SELECT COUNT(*) FROM ledger_entries WHERE project_id = ? AND person_id = ?) + (SELECT COUNT(*) FROM fund_transfers WHERE project_id = ? AND (from_person_id = ? OR to_person_id = ?)) AS count",
     ).bind(projectId, personId, projectId, personId, personId).first<{ count: number }>();
-    if ((usage?.count ?? 0) > 0) return json({ error: "Referenced people can only be archived" }, { status: 409 });
+    if ((usage?.count ?? 0) > 0) return json({ error: "已有往來紀錄的人員不可刪除，請改為停用" }, { status: 409 });
     await env.DB.prepare("DELETE FROM people WHERE id = ? AND project_id = ?").bind(personId, projectId).run();
     await touchProject(projectId, env);
     return new Response(null, { status: 204 });
   }
-  return json({ error: "Method not allowed" }, { status: 405 });
+  return json({ error: "不支援的方法" }, { status: 405 });
 }
 
 async function transfers(request: Request, env: Env, projectId: string, transferId?: string): Promise<Response> {
-  if (!await findProject(projectId, env)) return json({ error: "Project not found" }, { status: 404 });
+  if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   if (!transferId && request.method === "GET") {
     const result = await env.DB.prepare(
       "SELECT * FROM fund_transfers WHERE project_id = ? ORDER BY occurred_on DESC, created_at DESC",
@@ -685,11 +685,11 @@ async function transfers(request: Request, env: Env, projectId: string, transfer
     const result = await env.DB.prepare("SELECT * FROM fund_transfers WHERE id = ?").bind(id).first<Record<string, unknown>>();
     return json(mapTransfer(result!), { status: 201 });
   }
-  if (!transferId) return json({ error: "Transfer operation not found" }, { status: 404 });
+  if (!transferId) return json({ error: "找不到人員移轉操作" }, { status: 404 });
   const existing = await env.DB.prepare(
     "SELECT id FROM fund_transfers WHERE id = ? AND project_id = ?",
   ).bind(transferId, projectId).first();
-  if (!existing) return json({ error: "Transfer not found" }, { status: 404 });
+  if (!existing) return json({ error: "找不到此筆人員移轉" }, { status: 404 });
   if (request.method === "PATCH") {
     const input = await resolveTransferPeople(env, projectId, parseTransfer(await requireJson(request)));
     const timestamp = now();
@@ -705,7 +705,7 @@ async function transfers(request: Request, env: Env, projectId: string, transfer
     await touchProject(projectId, env);
     return new Response(null, { status: 204 });
   }
-  return json({ error: "Method not allowed" }, { status: 405 });
+  return json({ error: "不支援的方法" }, { status: 405 });
 }
 
 
@@ -903,11 +903,11 @@ async function exportCsv(env: Env, projectId: string): Promise<Response> {
 }
 
 async function exportCashflowCsv(env: Env, projectId: string): Promise<Response> {
-  if (!await findProject(projectId, env)) return json({ error: "Project not found" }, { status: 404 });
+  if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   const result = await env.DB.prepare(`
     SELECT e.occurred_on, e.kind AS source_type,
-      CASE WHEN e.kind = 'expense' THEN '????' ELSE COALESCE(p.name, '???') END AS from_name,
-      CASE WHEN e.kind = 'expense' THEN '???' ELSE '????' END AS to_name,
+      CASE WHEN e.kind = 'expense' THEN '工程帳戶' ELSE COALESCE(p.name, '未指定人員') END AS from_name,
+      CASE WHEN e.kind = 'expense' THEN COALESCE(p.name, '未指定人員') ELSE '工程帳戶' END AS to_name,
       CASE WHEN e.kind = 'expense' THEN '' ELSE COALESCE(p.role, '') END AS from_role,
       CASE WHEN e.kind = 'expense' THEN COALESCE(p.role, '') ELSE '' END AS to_role,
       e.status, e.amount, e.payment_method, e.note
@@ -925,7 +925,7 @@ async function exportCashflowCsv(env: Env, projectId: string): Promise<Response>
     WHERE t.project_id = ?
     ORDER BY occurred_on DESC
   `).bind(projectId, projectId).all<Record<string, unknown>>();
-  const headers = ["??", "????", "???", "?????", "???", "?????", "??", "??", "????", "??"];
+  const headers = ["日期", "類型", "出款方", "出款方身分", "收款方", "收款方身分", "狀態", "金額", "付款方式", "備註"];
   const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = "\uFEFF" + [headers, ...result.results.map((row) => [
     row.occurred_on, row.source_type, row.from_name, row.from_role, row.to_name, row.to_role,
