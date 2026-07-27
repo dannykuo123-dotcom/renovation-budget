@@ -211,7 +211,7 @@ function parseTransfer(input: Record<string, unknown>): TransferInput {
   const status = String(input.status);
   const fromPersonId = text(input.fromPersonId, 80);
   const toPersonId = text(input.toPersonId, 80);
-  if (!amount || !/^\d{4}-\d{2}-\d{2}$/.test(occurredOn) || !["posted", "pending", "void"].includes(status)) {
+  if (!amount || !/^\d{4}-\d{2}-\d{2}$/.test(occurredOn) || !["posted", "pending"].includes(status)) {
     throw new Error("移轉金額、日期或狀態格式不正確");
   }
   if (!fromPersonId || !toPersonId || fromPersonId === toPersonId) {
@@ -685,11 +685,11 @@ async function transfers(request: Request, env: Env, projectId: string, transfer
     const result = await env.DB.prepare("SELECT * FROM fund_transfers WHERE id = ?").bind(id).first<Record<string, unknown>>();
     return json(mapTransfer(result!), { status: 201 });
   }
-  if (!transferId) return json({ error: "找不到人員移轉操作" }, { status: 404 });
+  if (!transferId) return json({ error: "找不到資金移轉操作" }, { status: 404 });
   const existing = await env.DB.prepare(
     "SELECT id FROM fund_transfers WHERE id = ? AND project_id = ?",
   ).bind(transferId, projectId).first();
-  if (!existing) return json({ error: "找不到此筆人員移轉" }, { status: 404 });
+  if (!existing) return json({ error: "找不到此筆資金移轉" }, { status: 404 });
   if (request.method === "PATCH") {
     const input = await resolveTransferPeople(env, projectId, parseTransfer(await requireJson(request)));
     const timestamp = now();

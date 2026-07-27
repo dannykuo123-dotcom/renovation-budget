@@ -276,7 +276,7 @@ export async function saveTransfer(projectId: string, input: TransferInput, tran
     }
     if (transferId) {
       const transfer = dashboard.transfers.find((item) => item.id === transferId);
-      if (!transfer) throw new Error("找不到此筆人員移轉");
+      if (!transfer) throw new Error("找不到此筆資金移轉");
       Object.assign(transfer, input, { updatedAt: now() });
       touchDemo(projectId);
       return clone(transfer);

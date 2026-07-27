@@ -537,7 +537,7 @@ function renderCashflowLegacy() {
 */
 
 function cashflowStatusLabel(status: "posted" | "pending" | "void"): string {
-  return status === "posted" ? "已完成" : status === "pending" ? "待處理" : "已作廢";
+  return status === "posted" ? "已完成" : status === "pending" ? "待處理" : "已取消";
 }
 
 function cashflowPaymentLabel(paymentMethod: string): string {
@@ -573,12 +573,12 @@ function renderCashflow() {
     toId: transfer.toPersonId,
     direct: true,
   }));
-  const rows = [...entryFlows, ...transferFlows].filter((row) =>
+  const rows = [...entryFlows, ...transferFlows].filter((row) => row.status !== "void" &&
     (!cashflowPersonFilter || row.fromId === cashflowPersonFilter || row.toId === cashflowPersonFilter) &&
     (!cashflowStatusFilter || row.status === cashflowStatusFilter) &&
     (!cashflowTypeFilter || row.source === cashflowTypeFilter),
   ).sort((left, right) => right.occurredOn.localeCompare(left.occurredOn));
-  const sourceLabel = (source: EntryKind | "transfer") => ({ income: "資金入帳", expense: "工程支出", refund: "退款入帳", transfer: "人員移轉" })[source];
+  const sourceLabel = (source: EntryKind | "transfer") => ({ income: "資金入帳", expense: "工程支出", refund: "退款入帳", transfer: "資金移轉" })[source];
   const accountOrPerson = (personId: string | null) => personId ? personName(personId) : "工程帳戶";
   const tab = (id: CashflowTab, label: string) => `<button class="secondary ${cashflowTab === id ? "selected-tab" : ""}" data-cashflow-tab="${id}">${label}</button>`;
   const tabs = `<section class="cashflow-tabs">${tab("overview", "總覽")}${tab("records", "資金明細")}${tab("people", "人員管理")}</section>`;
@@ -586,7 +586,7 @@ function renderCashflow() {
   const overview = `
     <section class="cashflow-intro">
       <div><p class="eyebrow">PROJECT CASH FLOW</p><h3>工程帳戶與人員往來</h3><p>正數代表工程尚應付給該人員；負數代表該人員尚應付回工程。待處理款項不會計入餘額。</p></div>
-      <button class="primary" data-action="new-transfer">↔ 新增人員移轉</button>
+      <button class="primary" data-action="new-transfer">↔ 新增資金移轉</button>
     </section>
     <section class="cashflow-summary-cards">
       <article><small>工程帳戶餘額</small><strong class="${totals.cashBalance < 0 ? "negative" : ""}">${formatMoney(totals.cashBalance)}</strong><span>已入帳 ${formatMoney(totals.received)} · 已支出 ${formatMoney(totals.spent)}</span></article>
@@ -602,8 +602,8 @@ function renderCashflow() {
       return `<article class="mobile-record-card cashflow-summary-card"><div class="mobile-record-head"><div><strong>${esc(summary.person.name)}</strong><small>${esc(summary.person.role || "未填職稱")}</small></div><b class="${summary.net < 0 ? "negative" : "income"}">${label} ${formatMoney(Math.abs(summary.net))}</b></div><div class="cashflow-mini-values"><span>已收 ${formatMoney(summary.received)}</span><span>已付 ${formatMoney(summary.paid)}</span><span>待收 ${formatMoney(summary.pendingReceive)}</span><span>待付 ${formatMoney(summary.pendingPay)}</span></div></article>`;
     }).join("") || '<div class="panel empty">尚未建立人員，請先到「人員管理」新增。</div>'}</section>`;
   const records = `
-    <section class="page-actions"><p>收支紀錄會自動顯示在這裡；只有「人員移轉」可在此直接新增、編輯或刪除。</p><div class="entry-action-buttons"><button class="secondary" data-action="export-cashflow">下載 CSV</button><button class="primary" data-action="new-transfer">↔ 新增人員移轉</button></div></section>
-    <section class="panel cashflow-filters"><label>人員<select id="cashflow-person-filter">${personOptions}</select></label><label>類型<select id="cashflow-type-filter"><option value="">全部類型</option><option value="income" ${cashflowTypeFilter === "income" ? "selected" : ""}>資金入帳</option><option value="expense" ${cashflowTypeFilter === "expense" ? "selected" : ""}>工程支出</option><option value="refund" ${cashflowTypeFilter === "refund" ? "selected" : ""}>退款入帳</option><option value="transfer" ${cashflowTypeFilter === "transfer" ? "selected" : ""}>人員移轉</option></select></label><label>狀態<select id="cashflow-status-filter"><option value="">全部狀態</option><option value="posted" ${cashflowStatusFilter === "posted" ? "selected" : ""}>已完成</option><option value="pending" ${cashflowStatusFilter === "pending" ? "selected" : ""}>待處理</option><option value="void" ${cashflowStatusFilter === "void" ? "selected" : ""}>已作廢</option></select></label></section>
+    <section class="page-actions"><p>收支紀錄會自動顯示在這裡；只有「資金移轉」可在此直接新增、編輯或刪除。</p><div class="entry-action-buttons"><button class="secondary" data-action="export-cashflow">下載 CSV</button><button class="primary" data-action="new-transfer">↔ 新增資金移轉</button></div></section>
+    <section class="panel cashflow-filters"><label>人員<select id="cashflow-person-filter">${personOptions}</select></label><label>類型<select id="cashflow-type-filter"><option value="">全部類型</option><option value="income" ${cashflowTypeFilter === "income" ? "selected" : ""}>資金入帳</option><option value="expense" ${cashflowTypeFilter === "expense" ? "selected" : ""}>工程支出</option><option value="refund" ${cashflowTypeFilter === "refund" ? "selected" : ""}>退款入帳</option><option value="transfer" ${cashflowTypeFilter === "transfer" ? "selected" : ""}>資金移轉</option></select></label><label>狀態<select id="cashflow-status-filter"><option value="">全部狀態</option><option value="posted" ${cashflowStatusFilter === "posted" ? "selected" : ""}>已完成</option><option value="pending" ${cashflowStatusFilter === "pending" ? "selected" : ""}>待處理</option></select></label></section>
     <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>日期</th><th>類型</th><th>出款方</th><th>收款方</th><th>付款方式</th><th>狀態</th><th>金額</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr><td>${dateLabel(row.occurredOn)}</td><td>${sourceLabel(row.source)}</td><td>${esc(accountOrPerson(row.fromId))}</td><td>${esc(accountOrPerson(row.toId))}</td><td>${esc(cashflowPaymentLabel(row.paymentMethod))}</td><td><span class="status ${row.status}">${cashflowStatusLabel(row.status)}</span></td><td class="amount">${formatMoney(row.amount)}</td><td class="row-actions">${row.direct ? `<button data-action="edit-transfer" data-id="${row.id}">編輯</button><button data-action="delete-transfer" data-id="${row.id}">刪除</button>` : '<small>請至收支紀錄編輯</small>'}</td></tr>`).join("") || '<tr><td colspan="8" class="empty">目前沒有符合條件的資金流紀錄。</td></tr>'}</tbody></table></div></section>
     <section class="mobile-record-list">${rows.map((row) => `<article class="mobile-record-card compact-entry-card"><div class="mobile-record-head"><div><small>${dateLabel(row.occurredOn)} · ${sourceLabel(row.source)}</small><strong>${esc(accountOrPerson(row.fromId))} → ${esc(accountOrPerson(row.toId))}</strong></div><b class="amount">${formatMoney(row.amount)}</b></div><div class="compact-entry-footer"><div class="compact-entry-meta"><span>${esc(cashflowPaymentLabel(row.paymentMethod))}</span><span class="status ${row.status}">${cashflowStatusLabel(row.status)}</span></div>${row.direct ? `<div class="compact-entry-actions"><button aria-label="編輯移轉" data-action="edit-transfer" data-id="${row.id}">✎</button><button class="danger-text" aria-label="刪除移轉" data-action="delete-transfer" data-id="${row.id}">×</button></div>` : '<small>收支紀錄</small>'}</div></article>`).join("") || '<div class="panel empty">目前沒有符合條件的資金流紀錄。</div>'}</section>`;
   const people = `
@@ -896,14 +896,14 @@ function openTransferModal(existing?: FundTransfer) {
   const active = payload!.people.filter((person) => person.active || person.id === existing?.fromPersonId || person.id === existing?.toPersonId);
   const optionList = (selected: string | undefined) => `<option value="">請選擇人員</option>${active.map((person) => `<option value="${person.id}" ${person.id === selected ? "selected" : ""}>${esc(person.name)}${person.role ? `（${esc(person.role)}）` : ""}</option>`).join("")}`;
   openModal(`
-    <div class="modal-head"><div><p class="eyebrow">PERSON TO PERSON</p><h3>${existing ? "編輯人員移轉" : "新增人員移轉"}</h3></div><button class="icon-button" aria-label="關閉" data-action="close-modal">×</button></div>
+    <div class="modal-head"><div><p class="eyebrow">FUND TRANSFER</p><h3>${existing ? "編輯資金移轉" : "新增資金移轉"}</h3></div><button class="icon-button" aria-label="關閉" data-action="close-modal">×</button></div>
     <form id="transfer-form" class="form-grid">
       <label>出款人<select name="fromPersonId" required>${optionList(existing?.fromPersonId)}</select></label>
       <label>收款人<select name="toPersonId" required>${optionList(existing?.toPersonId)}</select></label>
       <label>金額<input name="amount" type="number" min="1" step="1" required value="${existing?.amount ?? ""}" /></label>
       <label>日期<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
       <label>付款方式<select name="paymentMethod"><option value="">未指定</option>${["銀行轉帳", "現金", "信用卡", "電子支付"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
-      <label>狀態<select name="status"><option value="posted" ${existing?.status !== "pending" && existing?.status !== "void" ? "selected" : ""}>已完成</option><option value="pending" ${existing?.status === "pending" ? "selected" : ""}>待處理</option><option value="void" ${existing?.status === "void" ? "selected" : ""}>已作廢</option></select></label>
+      <label>狀態<select name="status"><option value="posted" ${existing?.status !== "pending" ? "selected" : ""}>已完成</option><option value="pending" ${existing?.status === "pending" ? "selected" : ""}>待處理</option></select></label>
       <p class="form-hint full">僅記錄人員之間的移轉；工程收入、支出與退款請從各自的收支頁建立。</p>
       <label class="full">備註<textarea name="note" maxlength="500" placeholder="例如：代墊材料款結算">${esc(existing?.note ?? "")}</textarea></label>
       <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存移轉</button></div>
@@ -915,7 +915,7 @@ function openTransferModal(existing?: FundTransfer) {
       await saveTransfer(currentProjectId(), { fromPersonId: String(form.get("fromPersonId")), toPersonId: String(form.get("toPersonId")), amount: Number(form.get("amount")), occurredOn: String(form.get("occurredOn")), status: String(form.get("status")) as FundTransfer["status"], paymentMethod: String(form.get("paymentMethod")), note: String(form.get("note")).trim() }, existing?.id);
       document.querySelector(".modal-backdrop")?.remove();
       await refresh();
-      toast("人員移轉已儲存");
+      toast("資金移轉已儲存");
     } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
   });
 }
@@ -995,8 +995,8 @@ function bindCommon() {
     }
     if (action === "new-transfer") openTransferModal();
     if (action === "edit-transfer") openTransferModal(payload!.transfers.find((transfer) => transfer.id === button.dataset.id));
-    if (action === "delete-transfer" && confirm("確定刪除這筆人員移轉嗎？")) {
-      try { await deleteTransfer(currentProjectId(), button.dataset.id!); await refresh(); toast("人員移轉已刪除"); }
+    if (action === "delete-transfer" && confirm("確定刪除這筆資金移轉嗎？")) {
+      try { await deleteTransfer(currentProjectId(), button.dataset.id!); await refresh(); toast("資金移轉已刪除"); }
       catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
     }
   }));
