@@ -388,7 +388,7 @@ async function resolveEntryPerson(env: Env, projectId: string, input: EntryInput
     "SELECT id, name FROM people WHERE id = ? AND project_id = ? AND active = 1",
   ).bind(input.personId, projectId).first<{ id: string; name: string }>();
   if (!person) throw new Error("請選擇啟用中的人員");
-  return { ...input, personId: person.id, counterparty: person.name };
+  return { ...input, personId: person.id };
 }
 
 async function resolveTransferPeople(

@@ -457,9 +457,9 @@ function renderEntries(view: "expenses" | "funding") {
       return entrySortDirection === "asc" ? compare : -compare;
     });
   const categoryOptions = `<option value="">全部分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${filterCategory === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}`;
-  const statusOptions = `<option value="">全部狀態</option><option value="expense-posted" ${filterStatus === "expense-posted" ? "selected" : ""}>已付款</option><option value="expense-pending" ${filterStatus === "expense-pending" ? "selected" : ""}>待付款</option><option value="refund-posted" ${filterStatus === "refund-posted" ? "selected" : ""}>已退款</option><option value="refund-pending" ${filterStatus === "refund-pending" ? "selected" : ""}>待退款</option>`;
+  const statusOptions = `<option value="">全部狀態</option><option value="expense-posted" ${filterStatus === "expense-posted" ? "selected" : ""}>已付款</option><option value="refund-posted" ${filterStatus === "refund-posted" ? "selected" : ""}>已退款</option><option value="refund-pending" ${filterStatus === "refund-pending" ? "selected" : ""}>待退款</option>`;
   layout(`
-    <section class="page-actions"><p>${isFunding ? "記錄實際收到的匯款，金額會直接增加可用資金。" : "管理已付款、待付款、退款與工程憑證。"}</p><div class="entry-action-buttons">${isFunding ? "" : '<button class="secondary" data-action="new-entry" data-kind="refund">↩ 新增退貨</button>'}<button class="primary" data-action="new-entry" data-kind="${isFunding ? "income" : "expense"}">＋ 新增${isFunding ? "入帳" : "支出"}</button></div></section>
+    <section class="page-actions"><p>${isFunding ? "記錄實際收到的匯款，金額會直接增加可用資金。" : "管理已付款支出、退款與工程憑證。"}</p><div class="entry-action-buttons">${isFunding ? "" : '<button class="secondary" data-action="new-entry" data-kind="refund">↩ 新增退貨</button>'}<button class="primary" data-action="new-entry" data-kind="${isFunding ? "income" : "expense"}">＋ 新增${isFunding ? "入帳" : "支出"}</button></div></section>
     <section class="filters panel desktop-entry-filters"><label>搜尋<input id="search" placeholder="品項、對象或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<label>分類<select id="category-filter">${categoryOptions}</select></label><label>狀態<select id="status-filter">${statusOptions}</select></label>`}</section>
     <section class="mobile-entry-filters"> <div class="mobile-filter-bar"><label><span class="sr-only">搜尋</span><input id="mobile-search" placeholder="搜尋品項、對象或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<button class="secondary mobile-filter-toggle" id="mobile-filter-toggle" aria-expanded="${mobileFiltersOpen}">${mobileFilterSummary()} ${mobileFiltersOpen ? "⌃" : "⌄"}</button>`}</div>${!isFunding ? `<div class="mobile-filter-options" ${mobileFiltersOpen ? "" : "hidden"}><label>分類<select id="mobile-category-filter">${categoryOptions}</select></label><label>狀態<select id="mobile-status-filter">${statusOptions}</select></label></div>` : ""}</section>
     <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="entry-table"><thead><tr><th><button class="sort-button" data-sort-entry="occurredOn">日期 ${sortIndicator("occurredOn", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="description">品項 ${sortIndicator("description", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="category">${isFunding ? "來源" : "分類"} ${sortIndicator("category", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="${isFunding ? "paymentMethod" : "counterparty"}">${isFunding ? "付款方式" : "對象"} ${sortIndicator(isFunding ? "paymentMethod" : "counterparty", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="status">狀態 ${sortIndicator("status", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="amount">金額 ${sortIndicator("amount", entrySortKey, entrySortDirection)}</button></th><th></th></tr></thead><tbody>${entries.map((entry) => entryRow(entry, isFunding)).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的紀錄。</td></tr>'}</tbody></table></div></section>
@@ -546,18 +546,30 @@ function cashflowPaymentLabel(paymentMethod: string): string {
 
 function renderCashflow() {
   const summaries = calculatePersonCashflows(payload!.people, payload!.entries, payload!.transfers);
-  const entryFlows = payload!.entries.filter((entry) => entry.personId).map((entry) => ({
-    id: entry.id,
-    source: entry.kind as EntryKind | "transfer",
-    occurredOn: entry.occurredOn,
-    status: entry.status,
-    amount: entry.amount,
-    paymentMethod: entry.paymentMethod,
-    note: entry.note,
-    fromId: entry.kind === "expense" ? null : entry.personId,
-    toId: entry.kind === "expense" ? entry.personId : null,
-    direct: false,
-  }));
+  const entryFlows = payload!.entries.filter((entry) => entry.personId).map((entry) => {
+    const person = personById(entry.personId);
+    const counterparty = entry.counterparty && entry.counterparty !== person?.name
+      ? entry.counterparty
+      : entry.kind === "expense" ? "支出對象未填" : entry.kind === "refund" ? "退款來源未填" : personName(entry.personId);
+    return {
+      id: entry.id,
+      source: entry.kind as EntryKind | "transfer",
+      occurredOn: entry.occurredOn,
+      status: entry.status,
+      amount: entry.amount,
+      paymentMethod: entry.paymentMethod,
+      note: entry.note,
+      description: entry.description,
+      from: entry.kind === "expense"
+        ? personName(entry.personId)
+        : counterparty,
+      to: entry.kind === "expense"
+        ? counterparty
+        : entry.kind === "refund" ? personName(entry.personId) : "工程帳戶",
+      personIds: [entry.personId],
+      direct: false,
+    };
+  });
   const transferFlows = payload!.transfers.map((transfer) => ({
     id: transfer.id,
     source: "transfer" as const,
@@ -566,38 +578,58 @@ function renderCashflow() {
     amount: transfer.amount,
     paymentMethod: transfer.paymentMethod,
     note: transfer.note,
-    fromId: transfer.fromPersonId,
-    toId: transfer.toPersonId,
+    description: transfer.note || "人員資金移轉",
+    from: personName(transfer.fromPersonId),
+    to: personName(transfer.toPersonId),
+    personIds: [transfer.fromPersonId, transfer.toPersonId],
     direct: true,
   }));
   const rows = [...entryFlows, ...transferFlows].filter((row) => row.status !== "void" &&
-    (!cashflowPersonFilter || row.fromId === cashflowPersonFilter || row.toId === cashflowPersonFilter) &&
+    (!cashflowPersonFilter || row.personIds.includes(cashflowPersonFilter)) &&
     (!cashflowStatusFilter || row.status === cashflowStatusFilter) &&
     (!cashflowTypeFilter || row.source === cashflowTypeFilter),
   ).sort((left, right) => right.occurredOn.localeCompare(left.occurredOn));
   const sourceLabel = (source: EntryKind | "transfer") => ({ income: "資金入帳", expense: "工程支出", refund: "退款入帳", transfer: "資金移轉" })[source];
-  const accountOrPerson = (personId: string | null) => personId ? personName(personId) : "工程帳戶";
   const tab = (id: CashflowTab, label: string) => `<button class="secondary ${cashflowTab === id ? "selected-tab" : ""}" data-cashflow-tab="${id}">${label}</button>`;
-  const tabs = `<section class="cashflow-tabs">${tab("overview", "總覽")}${tab("records", "資金明細")}${tab("people", "人員管理")}</section>`;
+  const tabs = `<section class="cashflow-tabs">${tab("overview", "結算總覽")}${tab("records", "資金明細")}${tab("people", "人員管理")}</section>`;
   const personOptions = `<option value="">全部人員</option>${payload!.people.map((person) => `<option value="${person.id}" ${cashflowPersonFilter === person.id ? "selected" : ""}>${esc(person.name)}</option>`).join("")}`;
+  const projectPayable = summaries.reduce((sum, summary) => sum + Math.max(summary.settlement, 0), 0);
+  const projectReceivable = summaries.reduce((sum, summary) => sum + Math.max(-summary.settlement, 0), 0);
+  const settledPeople = summaries.filter((summary) => summary.settlement === 0).length;
+  const settlementResult = (summary: (typeof summaries)[number]) => summary.settlement > 0
+    ? `<span class="settlement-result payable"><small>工程還要付他</small><strong>${formatMoney(summary.settlement)}</strong></span>`
+    : summary.settlement < 0
+      ? `<span class="settlement-result receivable"><small>他還要繳回工程</small><strong>${formatMoney(-summary.settlement)}</strong></span>`
+      : `<span class="settlement-result settled"><small>目前狀態</small><strong>已結清</strong></span>`;
+  const pendingResult = (summary: (typeof summaries)[number]) => [
+    summary.pendingRefund ? `待退款 ${formatMoney(summary.pendingRefund)}` : "",
+    summary.pendingTransferReceived ? `待收到 ${formatMoney(summary.pendingTransferReceived)}` : "",
+    summary.pendingTransferSent ? `待轉出 ${formatMoney(summary.pendingTransferSent)}` : "",
+  ].filter(Boolean).join(" · ");
   const overview = `
     <section class="cashflow-intro">
-      <div><p class="eyebrow">PROJECT CASH FLOW</p><h3>工程帳戶與人員往來</h3><p>工程支出列為已付款；已收款只計人員之間實際收到的資金移轉。正數代表工程尚應付給該人員，負數代表工程尚應收回。</p></div>
+      <div><p class="eyebrow">PROJECT SETTLEMENT</p><h3>誰出了錢、誰拿到錢、最後誰欠誰</h3><p>代墊支出與轉出款會增加工程應付；收到移轉與退款會扣回。資金入帳另列為投入工程，不算人員代墊。</p></div>
       <button class="primary" data-action="new-transfer">↔ 新增資金移轉</button>
     </section>
-    <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>人員</th><th>已收款</th><th>已付款</th><th>待收款</th><th>待付款</th><th>與工程往來餘額</th><th></th></tr></thead><tbody>${summaries.map((summary) => {
-      const label = summary.net >= 0 ? "工程應付" : "工程應收";
-      return `<tr><td><strong>${esc(summary.person.name)}</strong>${summary.person.role ? `<small class="cashflow-role">${esc(summary.person.role)}</small>` : ""}${summary.person.active ? "" : ' <span class="status void">已停用</span>'}</td><td>${formatMoney(summary.received)}</td><td>${formatMoney(summary.paid)}</td><td>${formatMoney(summary.pendingReceive)}</td><td>${formatMoney(summary.pendingPay)}</td><td class="${summary.net < 0 ? "negative" : "income"}"><strong>${label} ${formatMoney(Math.abs(summary.net))}</strong></td><td class="row-actions"><button data-action="edit-person-cashflow" data-id="${summary.person.id}">編輯金流</button></td></tr>`;
-    }).join("") || '<tr><td colspan="7" class="empty">尚未建立人員，請先到「人員管理」新增。</td></tr>'}</tbody></table></div></section>
+    <section class="panel settlement-overview">
+      <div><small>工程還需付給人員</small><strong class="payable">${formatMoney(projectPayable)}</strong></div>
+      <div><small>人員還需繳回工程</small><strong class="receivable">${formatMoney(projectReceivable)}</strong></div>
+      <div><small>已結清人數</small><strong>${settledPeople} 人</strong></div>
+    </section>
+    <section class="cashflow-rule"><span>＋ 增加工程應付：代墊支出、轉出給別人</span><span>－ 減少工程應付：收到別人移轉、收到退款</span><span>○ 不計入結算：投入工程</span></section>
+    <section class="panel table-panel desktop-table settlement-table"><div class="table-wrap"><table><thead><tr><th>人員</th><th>為工程付款</th><th>人員間資金移轉</th><th>收到退款</th><th>現在要結算</th><th></th></tr></thead><tbody>${summaries.map((summary) => {
+      const pending = pendingResult(summary);
+      return `<tr><td><strong>${esc(summary.person.name)}</strong>${summary.person.role ? `<small class="cashflow-role">${esc(summary.person.role)}</small>` : ""}${summary.person.active ? "" : ' <span class="status void">已停用</span>'}</td><td><div class="cashflow-cell"><strong>代墊 ${formatMoney(summary.expensePaid)}</strong><small>投入工程 ${formatMoney(summary.fundingPaid)}</small></div></td><td><div class="cashflow-cell"><strong>轉出 ${formatMoney(summary.transferSent)}</strong><small>收到 ${formatMoney(summary.transferReceived)}</small></div></td><td><div class="cashflow-cell"><strong>${formatMoney(summary.refundReceived)}</strong>${summary.pendingRefund ? `<small>另有待退款 ${formatMoney(summary.pendingRefund)}</small>` : ""}</div></td><td>${settlementResult(summary)}${pending ? `<small class="pending-note">${pending}</small>` : ""}</td><td class="row-actions"><button data-action="edit-person-cashflow" data-id="${summary.person.id}">查看明細</button></td></tr>`;
+    }).join("") || '<tr><td colspan="6" class="empty">尚未建立人員，請先到「人員管理」新增。</td></tr>'}</tbody></table></div></section>
     <section class="mobile-record-list">${summaries.map((summary) => {
-      const label = summary.net >= 0 ? "工程應付" : "工程應收";
-      return `<article class="mobile-record-card cashflow-summary-card"><div class="mobile-record-head"><div><strong>${esc(summary.person.name)}</strong><small>${esc(summary.person.role || "未填職稱")}</small></div><b class="${summary.net < 0 ? "negative" : "income"}">${label} ${formatMoney(Math.abs(summary.net))}</b></div><div class="cashflow-mini-values"><span>已收 ${formatMoney(summary.received)}</span><span>已付 ${formatMoney(summary.paid)}</span><span>待收 ${formatMoney(summary.pendingReceive)}</span><span>待付 ${formatMoney(summary.pendingPay)}</span></div><div class="mobile-record-actions"><button data-action="edit-person-cashflow" data-id="${summary.person.id}">編輯金流</button></div></article>`;
+      const pending = pendingResult(summary);
+      return `<article class="mobile-record-card cashflow-summary-card"><div class="mobile-record-head"><div><strong>${esc(summary.person.name)}</strong><small>${esc(summary.person.role || "未填職稱")}</small></div>${settlementResult(summary)}</div><div class="cashflow-mobile-breakdown"><span><small>代墊支出</small><b>${formatMoney(summary.expensePaid)}</b></span><span><small>投入工程</small><b>${formatMoney(summary.fundingPaid)}</b></span><span><small>轉出／收到</small><b>${formatMoney(summary.transferSent)}／${formatMoney(summary.transferReceived)}</b></span><span><small>已退款</small><b>${formatMoney(summary.refundReceived)}</b></span></div>${pending ? `<p class="pending-note">${pending}</p>` : ""}<div class="mobile-record-actions"><button data-action="edit-person-cashflow" data-id="${summary.person.id}">查看資金明細</button></div></article>`;
     }).join("") || '<div class="panel empty">尚未建立人員，請先到「人員管理」新增。</div>'}</section>`;
   const records = `
-    <section class="page-actions"><p>可直接編輯收入、支出、退款與資金移轉；異動後會同步更新工程與人員餘額。</p><div class="entry-action-buttons"><button class="secondary" data-action="export-cashflow">下載 CSV</button><button class="primary" data-action="new-transfer">↔ 新增資金移轉</button></div></section>
+    <section class="page-actions"><p>每筆都直接顯示「出款方 → 收款方」，可追查錢實際從哪裡流到哪裡。</p><div class="entry-action-buttons"><button class="secondary" data-action="export-cashflow">下載 CSV</button><button class="primary" data-action="new-transfer">↔ 新增資金移轉</button></div></section>
     <section class="panel cashflow-filters"><label>人員<select id="cashflow-person-filter">${personOptions}</select></label><label>類型<select id="cashflow-type-filter"><option value="">全部類型</option><option value="income" ${cashflowTypeFilter === "income" ? "selected" : ""}>資金入帳</option><option value="expense" ${cashflowTypeFilter === "expense" ? "selected" : ""}>工程支出</option><option value="refund" ${cashflowTypeFilter === "refund" ? "selected" : ""}>退款入帳</option><option value="transfer" ${cashflowTypeFilter === "transfer" ? "selected" : ""}>資金移轉</option></select></label><label>狀態<select id="cashflow-status-filter"><option value="">全部狀態</option><option value="posted" ${cashflowStatusFilter === "posted" ? "selected" : ""}>已完成</option><option value="pending" ${cashflowStatusFilter === "pending" ? "selected" : ""}>待處理</option></select></label></section>
-    <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>日期</th><th>類型</th><th>出款方</th><th>收款方</th><th>付款方式</th><th>狀態</th><th>金額</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr><td>${dateLabel(row.occurredOn)}</td><td>${sourceLabel(row.source)}</td><td>${esc(accountOrPerson(row.fromId))}</td><td>${esc(accountOrPerson(row.toId))}</td><td>${esc(cashflowPaymentLabel(row.paymentMethod))}</td><td><span class="status ${row.status}">${cashflowStatusLabel(row.status)}</span></td><td class="amount">${formatMoney(row.amount)}</td><td class="row-actions">${row.direct ? `<button data-action="edit-transfer" data-id="${row.id}">編輯</button><button data-action="delete-transfer" data-id="${row.id}">刪除</button>` : `<button data-action="edit-entry" data-id="${row.id}">編輯</button><button data-action="delete-entry" data-id="${row.id}">刪除</button>`}</td></tr>`).join("") || '<tr><td colspan="8" class="empty">目前沒有符合條件的資金流紀錄。</td></tr>'}</tbody></table></div></section>
-    <section class="mobile-record-list">${rows.map((row) => `<article class="mobile-record-card compact-entry-card"><div class="mobile-record-head"><div><small>${dateLabel(row.occurredOn)} · ${sourceLabel(row.source)}</small><strong>${esc(accountOrPerson(row.fromId))} → ${esc(accountOrPerson(row.toId))}</strong></div><b class="amount">${formatMoney(row.amount)}</b></div><div class="compact-entry-footer"><div class="compact-entry-meta"><span>${esc(cashflowPaymentLabel(row.paymentMethod))}</span><span class="status ${row.status}">${cashflowStatusLabel(row.status)}</span></div>${row.direct ? `<div class="compact-entry-actions"><button aria-label="編輯移轉" data-action="edit-transfer" data-id="${row.id}">✎</button><button class="danger-text" aria-label="刪除移轉" data-action="delete-transfer" data-id="${row.id}">×</button></div>` : `<div class="compact-entry-actions"><button aria-label="編輯金流" data-action="edit-entry" data-id="${row.id}">✎</button><button class="danger-text" aria-label="刪除金流" data-action="delete-entry" data-id="${row.id}">×</button></div>`}</div></article>`).join("") || '<div class="panel empty">目前沒有符合條件的資金流紀錄。</div>'}</section>`;
+    <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>日期</th><th>類型／內容</th><th>資金方向</th><th>付款方式</th><th>狀態</th><th>金額</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr><td>${dateLabel(row.occurredOn)}</td><td><div class="cashflow-cell"><strong>${sourceLabel(row.source)}</strong><small>${esc(row.description)}</small></div></td><td><div class="flow-direction"><span>${esc(row.from)}</span><b>→</b><span>${esc(row.to)}</span></div></td><td>${esc(cashflowPaymentLabel(row.paymentMethod))}</td><td><span class="status ${row.status}">${cashflowStatusLabel(row.status)}</span></td><td class="amount">${formatMoney(row.amount)}</td><td class="row-actions">${row.direct ? `<button data-action="edit-transfer" data-id="${row.id}">編輯</button><button data-action="delete-transfer" data-id="${row.id}">刪除</button>` : `<button data-action="edit-entry" data-id="${row.id}">編輯</button><button data-action="delete-entry" data-id="${row.id}">刪除</button>`}</td></tr>`).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的資金流紀錄。</td></tr>'}</tbody></table></div></section>
+    <section class="mobile-record-list">${rows.map((row) => `<article class="mobile-record-card compact-entry-card cashflow-record-card"><div class="mobile-record-head"><div><small>${dateLabel(row.occurredOn)} · ${sourceLabel(row.source)}</small><strong>${esc(row.description)}</strong></div><b class="amount">${formatMoney(row.amount)}</b></div><div class="flow-direction"><span>${esc(row.from)}</span><b>→</b><span>${esc(row.to)}</span></div><div class="compact-entry-footer"><div class="compact-entry-meta"><span>${esc(cashflowPaymentLabel(row.paymentMethod))}</span><span class="status ${row.status}">${cashflowStatusLabel(row.status)}</span></div>${row.direct ? `<div class="compact-entry-actions"><button aria-label="編輯移轉" data-action="edit-transfer" data-id="${row.id}">✎</button><button class="danger-text" aria-label="刪除移轉" data-action="delete-transfer" data-id="${row.id}">×</button></div>` : `<div class="compact-entry-actions"><button aria-label="編輯金流" data-action="edit-entry" data-id="${row.id}">✎</button><button class="danger-text" aria-label="刪除金流" data-action="delete-entry" data-id="${row.id}">×</button></div>`}</div></article>`).join("") || '<div class="panel empty">目前沒有符合條件的資金流紀錄。</div>'}</section>`;
   const people = `
     <section class="page-actions"><p>人員名單僅屬於這個工程。已有往來紀錄的人員可停用，但不能直接刪除。</p><button class="primary" data-action="new-person">＋ 新增人員</button></section>
     <section class="people-grid">${payload!.people.map((person) => `<article class="mobile-record-card"><div class="mobile-record-head"><div><strong>${esc(person.name)}</strong><small>${esc(person.role || "未填職稱")}</small></div><span class="status ${person.active ? "posted" : "void"}">${person.active ? "啟用中" : "已停用"}</span></div>${person.note ? `<p class="muted">${esc(person.note)}</p>` : ""}<div class="mobile-record-actions"><button data-action="edit-person" data-id="${person.id}">編輯</button><button class="danger-text" data-action="delete-person" data-id="${person.id}">刪除</button></div></article>`).join("") || '<div class="panel empty">尚未建立人員。</div>'}</section>`;
@@ -757,6 +789,9 @@ function openCategoryModal(existing?: Category) {
 
 function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expense") {
   const kind = existing?.kind ?? defaultKind;
+  const personFieldLabel = kind === "expense" ? "付款人／代墊人" : kind === "refund" ? "原付款人" : "投入資金的人";
+  const counterpartyFieldLabel = kind === "expense" ? "付款對象／廠商" : kind === "refund" ? "退款來源" : "匯款來源";
+  const counterpartyPlaceholder = kind === "expense" ? "例如：材料行、工班" : kind === "refund" ? "例如：退貨廠商" : "例如：屋主、匯款人";
   const categoryOptions = `<option value="">不指定分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${(existing?.categoryId ?? "") === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}`;
   const refundSources = payload!.entries.filter((entry) =>
     entry.kind === "expense" && entry.status === "posted" && (entry.id === existing?.refundOfEntryId || refundReserved(entry.id, existing?.id) < entry.amount));
@@ -773,8 +808,8 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       <label>日期<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
       <label class="full refund-source-field">原始支出<select name="refundOfEntryId">${refundSourceOptions}</select></label>
       <label>預算分類<select name="categoryId">${categoryOptions}</select></label>
-      <label>\u4eba\u54e1<select name="personId" required>${activePersonOptions(existing?.personId ?? null)}</select></label>
-      <label>對象<input name="counterparty" maxlength="60" value="${esc(existing?.counterparty ?? "")}" placeholder="廠商或匯款人" /></label>
+      <label>${personFieldLabel}<select name="personId" required>${activePersonOptions(existing?.personId ?? null)}</select></label>
+      <label>${counterpartyFieldLabel}<input name="counterparty" maxlength="60" value="${esc(existing?.counterparty ?? "")}" placeholder="${counterpartyPlaceholder}" /></label>
       <label>付款方式<select name="paymentMethod"><option value="">未指定</option>${["銀行轉帳", "現金", "信用卡", "電子支付"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
       <label>狀態<select name="status"></select></label>
       <p class="form-hint full"></p>
@@ -838,13 +873,12 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     }
     try {
       const projectId = currentProjectId();
-      const selectedPerson = personById(String(form.get("personId")) || null);
       const result = await saveEntry(projectId, {
         kind: String(form.get("kind")) as EntryKind,
         status: String(form.get("status")) as LedgerEntry["status"],
         refundOfEntryId: form.get("refundOfEntryId")?.toString() || null,
         personId: String(form.get("personId")) || null,
-        counterparty: selectedPerson?.name ?? String(form.get("counterparty")).trim(),
+        counterparty: String(form.get("counterparty")).trim(),
         description: String(form.get("description")).trim(),
         amount: Number(form.get("amount")),
         occurredOn: String(form.get("occurredOn")),

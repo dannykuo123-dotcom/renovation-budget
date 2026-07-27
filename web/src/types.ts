@@ -72,11 +72,15 @@ export interface FundTransfer {
 
 export interface PersonCashflowSummary {
   person: Person;
-  received: number;
-  paid: number;
-  pendingReceive: number;
-  pendingPay: number;
-  net: number;
+  expensePaid: number;
+  fundingPaid: number;
+  refundReceived: number;
+  transferReceived: number;
+  transferSent: number;
+  pendingRefund: number;
+  pendingTransferReceived: number;
+  pendingTransferSent: number;
+  settlement: number;
 }
 export interface Project {
   id: string;

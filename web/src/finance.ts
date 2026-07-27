@@ -63,28 +63,23 @@ export function calculatePersonCashflows(
   transfers: FundTransfer[],
 ): PersonCashflowSummary[] {
   return people.map((person) => {
-    let received = 0;
-    let paid = 0;
-    let pendingReceive = 0;
-    let pendingPay = 0;
-    // Keep the project balance separate from the display columns. An expense is
-    // an engineering payment, even when it is associated with the payee.
-    let projectBalance = 0;
+    let expensePaid = 0;
+    let fundingPaid = 0;
+    let refundReceived = 0;
+    let transferReceived = 0;
+    let transferSent = 0;
+    let pendingRefund = 0;
+    let pendingTransferReceived = 0;
+    let pendingTransferSent = 0;
     for (const entry of entries) {
       if (entry.personId !== person.id || entry.status === "void") continue;
       if (entry.status === "pending") {
-        if (entry.kind === "expense") pendingPay += entry.amount;
-        if (entry.kind === "refund") pendingPay += entry.amount;
+        if (entry.kind === "refund") pendingRefund += entry.amount;
         continue;
       }
-      if (entry.kind === "expense") {
-        paid += entry.amount;
-        projectBalance += entry.amount;
-      }
-      if (entry.kind === "income" || entry.kind === "refund") {
-        paid += entry.amount;
-        projectBalance -= entry.amount;
-      }
+      if (entry.kind === "expense") expensePaid += entry.amount;
+      if (entry.kind === "income") fundingPaid += entry.amount;
+      if (entry.kind === "refund") refundReceived += entry.amount;
     }
     for (const transfer of transfers) {
       if (transfer.status === "void") continue;
@@ -92,13 +87,25 @@ export function calculatePersonCashflows(
       const isTo = transfer.toPersonId === person.id;
       if (!isFrom && !isTo) continue;
       if (transfer.status === "pending") {
-        if (isFrom) pendingPay += transfer.amount;
-        if (isTo) pendingReceive += transfer.amount;
+        if (isFrom) pendingTransferSent += transfer.amount;
+        if (isTo) pendingTransferReceived += transfer.amount;
         continue;
       }
-      if (isFrom) paid += transfer.amount;
-      if (isTo) received += transfer.amount;
+      if (isFrom) transferSent += transfer.amount;
+      if (isTo) transferReceived += transfer.amount;
     }
-    return { person, received, paid, pendingReceive, pendingPay, net: projectBalance };
-  }).sort((left, right) => right.net - left.net || left.person.name.localeCompare(right.person.name, "zh-Hant"));
+    const settlement = expensePaid + transferSent - refundReceived - transferReceived;
+    return {
+      person,
+      expensePaid,
+      fundingPaid,
+      refundReceived,
+      transferReceived,
+      transferSent,
+      pendingRefund,
+      pendingTransferReceived,
+      pendingTransferSent,
+      settlement,
+    };
+  }).sort((left, right) => right.settlement - left.settlement || left.person.name.localeCompare(right.person.name, "zh-Hant"));
 }

@@ -317,7 +317,7 @@ export async function saveEntry(
     } else {
       const person = dashboard.people.find((item) => item.id === input.personId && item.active);
       if (!person) throw new Error("請選擇啟用中的人員");
-      resolved = { ...input, personId: person.id, counterparty: person.name };
+      resolved = { ...input, personId: person.id };
     }
     if (entryId) {
       const item = dashboard.entries.find((entry) => entry.id === entryId)!;
