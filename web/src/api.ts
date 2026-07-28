@@ -235,10 +235,10 @@ export async function savePerson(projectId: string, input: PersonInput, personId
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;
     const duplicate = dashboard.people.find((person) => person.name.localeCompare(input.name, "zh-Hant", { sensitivity: "accent" }) === 0 && person.id !== personId);
-    if (duplicate) throw new Error("????????");
+    if (duplicate) throw new Error("同一工程內的人員名稱不可重複");
     if (personId) {
       const person = dashboard.people.find((item) => item.id === personId);
-      if (!person) throw new Error("?????");
+      if (!person) throw new Error("找不到此人員");
       Object.assign(person, input, { updatedAt: now() });
       touchDemo(projectId);
       return clone(person);
@@ -258,7 +258,7 @@ export async function deletePerson(projectId: string, personId: string): Promise
     const dashboard = demoDashboards.get(projectId)!;
     if (dashboard.entries.some((entry) => entry.personId === personId) ||
       dashboard.transfers.some((transfer) => transfer.fromPersonId === personId || transfer.toPersonId === personId)) {
-      throw new Error("???????????");
+      throw new Error("已被帳務或移轉引用的人員只能停用");
     }
     dashboard.people = dashboard.people.filter((person) => person.id !== personId);
     touchDemo(projectId);
@@ -272,11 +272,11 @@ export async function saveTransfer(projectId: string, input: TransferInput, tran
     const dashboard = demoDashboards.get(projectId)!;
     const validPeople = new Set(dashboard.people.filter((person) => person.active).map((person) => person.id));
     if (input.fromPersonId === input.toPersonId || !validPeople.has(input.fromPersonId) || !validPeople.has(input.toPersonId)) {
-      throw new Error("???????????");
+      throw new Error("轉出人與轉入人必須是不同的啟用人員");
     }
     if (transferId) {
       const transfer = dashboard.transfers.find((item) => item.id === transferId);
-      if (!transfer) throw new Error("?????????");
+      if (!transfer) throw new Error("找不到此資金移轉");
       Object.assign(transfer, input, { updatedAt: now() });
       touchDemo(projectId);
       return clone(transfer);
@@ -312,16 +312,25 @@ export async function saveEntry(
     let resolved = input;
     if (input.kind === "refund") {
       const source = dashboard.entries.find((entry) => entry.id === input.refundOfEntryId);
-      if (!source?.personId) throw new Error("Original expense needs a person");
+      if (!source?.personId) throw new Error("原始支出必須先指定付款人");
       resolved = { ...input, personId: source.personId, counterparty: source.counterparty };
     } else {
       const person = dashboard.people.find((item) => item.id === input.personId && item.active);
-      if (!person) throw new Error("Please select an active person");
+      if (!person) throw new Error("請選擇啟用中的人員");
       resolved = { ...input, personId: person.id, counterparty: person.name };
     }
     if (entryId) {
       const item = dashboard.entries.find((entry) => entry.id === entryId)!;
       Object.assign(item, resolved, { updatedAt: now() });
+      if (resolved.kind === "expense") {
+        dashboard.entries
+          .filter((entry) => entry.refundOfEntryId === entryId)
+          .forEach((refund) => Object.assign(refund, {
+            personId: resolved.personId,
+            counterparty: resolved.counterparty,
+            updatedAt: now(),
+          }));
+      }
       touchDemo(projectId);
       return clone(item);
     }
@@ -404,37 +413,26 @@ export async function downloadCashflowCsv(projectId: string, projectName: string
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;
     const person = (id: string | null) => dashboard.people.find((item) => item.id === id);
-    const entryRows = dashboard.entries.filter((entry) => entry.personId).map((entry) => {
-      const related = person(entry.personId);
-      const outgoing = entry.kind !== "expense";
-      return [
-        entry.occurredOn, entry.kind,
-        outgoing ? related?.name ?? entry.counterparty : "????",
-        outgoing ? related?.role ?? "" : "",
-        outgoing ? "????" : related?.name ?? entry.counterparty,
-        outgoing ? "" : related?.role ?? "",
-        entry.status, String(entry.amount), entry.paymentMethod, entry.note,
-      ];
-    });
     const transferRows = dashboard.transfers.map((transfer) => {
       const from = person(transfer.fromPersonId);
       const to = person(transfer.toPersonId);
-      return [transfer.occurredOn, "transfer", from?.name ?? "", from?.role ?? "", to?.name ?? "", to?.role ?? "", transfer.status, String(transfer.amount), transfer.paymentMethod, transfer.note];
+      const status = transfer.status === "posted" ? "已完成" : transfer.status === "pending" ? "待處理" : "已作廢";
+      return [transfer.occurredOn, from?.name ?? "", to?.name ?? "", status, String(transfer.amount), transfer.paymentMethod, transfer.note];
     });
-    saveCsv([["??", "????", "???", "?????", "???", "?????", "??", "??", "????", "??"], ...entryRows, ...transferRows], `${projectName}-???`);
+    saveCsv([["日期", "轉出人", "轉入人", "狀態", "金額", "付款方式", "備註"], ...transferRows], `${projectName}-資金移轉`);
     return;
   }
   const response = await fetch(`${configuredBase}/api/projects/${projectId}/cashflow/export.csv`, {
     headers: { Authorization: `Bearer ${session.token}` },
   });
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: "Download failed" }));
-    throw new ApiError(error.error || "Download failed", response.status);
+    const error = await response.json().catch(() => ({ error: "下載失敗" }));
+    throw new ApiError(error.error || "下載失敗", response.status);
   }
   const url = URL.createObjectURL(await response.blob());
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${projectName}-???.csv`;
+  link.download = `${projectName}-資金移轉.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculatePersonCashflows, calculateTotals } from "./finance";
+import { calculatePersonBalances, calculateTotals } from "./finance";
 import type { Category, FundTransfer, LedgerEntry, Person } from "./types";
 
 const categories: Category[] = [{ id: "c1", name: "材料", plannedAmount: 100000, color: "#6d5bd0", sortOrder: 1, items: [] }];
@@ -30,30 +30,43 @@ describe("calculateTotals", () => {
   });
 });
 
-describe("calculatePersonCashflows", () => {
+describe("calculatePersonBalances", () => {
   const person = (id: string, name: string): Person => ({
     id, name, role: "", note: "", active: true, createdAt: "", updatedAt: "",
   });
-  const people = [person("alice", "Alice"), person("bob", "Bob")];
+  const people = [person("ming", "Ming"), person("danny", "Danny"), person("mike", "Mike")];
 
-  it("combines posted ledger flow and direct transfers while keeping pending amounts separate", () => {
+  it("tracks how much project money each person currently holds", () => {
     const entries: LedgerEntry[] = [
-      { ...entry("income", 1000), personId: "alice" },
-      { ...entry("expense", 300), personId: "bob" },
-      { ...entry("refund", 50), personId: "bob" },
-      { ...entry("expense", 80, "pending"), personId: "alice" },
+      { ...entry("income", 400000), personId: "ming" },
+      { ...entry("expense", 47364), personId: "danny" },
+      { ...entry("refund", 2960), personId: "danny" },
+      { ...entry("expense", 8600), personId: "mike" },
     ];
     const transfers: FundTransfer[] = [
-      { id: "t1", fromPersonId: "alice", toPersonId: "bob", amount: 200, occurredOn: "2026-07-02", status: "posted", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
-      { id: "t2", fromPersonId: "bob", toPersonId: "alice", amount: 40, occurredOn: "2026-07-03", status: "pending", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
-      { id: "t3", fromPersonId: "alice", toPersonId: "bob", amount: 99, occurredOn: "2026-07-04", status: "void", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
+      { id: "t1", fromPersonId: "ming", toPersonId: "danny", amount: 100000, occurredOn: "2026-07-02", status: "posted", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
+      { id: "t2", fromPersonId: "danny", toPersonId: "mike", amount: 100000, occurredOn: "2026-07-03", status: "posted", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
     ];
-    const summaries = calculatePersonCashflows(people, entries, transfers);
-    expect(summaries.find((item) => item.person.id === "alice")).toMatchObject({
-      paid: 1200, received: 0, pendingReceive: 120, pendingPay: 0, net: -1200,
-    });
-    expect(summaries.find((item) => item.person.id === "bob")).toMatchObject({
-      paid: 50, received: 500, pendingReceive: 0, pendingPay: 40, net: 450,
-    });
+    const balances = calculatePersonBalances(people, entries, transfers);
+    expect(balances.find((item) => item.person.id === "ming")?.balance).toBe(300000);
+    expect(balances.find((item) => item.person.id === "danny")?.balance).toBe(-44404);
+    expect(balances.find((item) => item.person.id === "mike")?.balance).toBe(91400);
+    expect(balances.reduce((sum, item) => sum + item.balance, 0)).toBe(346996);
+  });
+
+  it("ignores pending and void activity until it is completed", () => {
+    const entries: LedgerEntry[] = [
+      { ...entry("income", 1000), personId: "ming" },
+      { ...entry("expense", 80, "pending"), personId: "ming" },
+      { ...entry("refund", 30, "pending"), personId: "ming" },
+    ];
+    const transfers: FundTransfer[] = [
+      { id: "t1", fromPersonId: "ming", toPersonId: "danny", amount: 200, occurredOn: "2026-07-02", status: "pending", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
+      { id: "t2", fromPersonId: "ming", toPersonId: "mike", amount: 99, occurredOn: "2026-07-03", status: "void", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
+    ];
+    const balances = calculatePersonBalances(people, entries, transfers);
+    expect(balances.find((item) => item.person.id === "ming")?.balance).toBe(1000);
+    expect(balances.find((item) => item.person.id === "danny")?.balance).toBe(0);
+    expect(balances.find((item) => item.person.id === "mike")?.balance).toBe(0);
   });
 });

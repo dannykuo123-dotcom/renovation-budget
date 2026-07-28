@@ -70,13 +70,9 @@ export interface FundTransfer {
   updatedAt: string;
 }
 
-export interface PersonCashflowSummary {
+export interface PersonBalanceSummary {
   person: Person;
-  received: number;
-  paid: number;
-  pendingReceive: number;
-  pendingPay: number;
-  net: number;
+  balance: number;
 }
 export interface Project {
   id: string;

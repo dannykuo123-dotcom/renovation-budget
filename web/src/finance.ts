@@ -1,4 +1,4 @@
-import type { Category, FundTransfer, LedgerEntry, Person, PersonCashflowSummary } from "./types";
+import type { Category, FundTransfer, LedgerEntry, Person, PersonBalanceSummary } from "./types";
 
 export interface Totals {
   planned: number;
@@ -57,39 +57,23 @@ export function categorySpent(categoryId: string, entries: LedgerEntry[]): numbe
 export const formatMoney = (amount: number) =>
   new Intl.NumberFormat("zh-TW", { style: "currency", currency: "TWD", maximumFractionDigits: 0 }).format(amount);
 
-export function calculatePersonCashflows(
+export function calculatePersonBalances(
   people: Person[],
   entries: LedgerEntry[],
   transfers: FundTransfer[],
-): PersonCashflowSummary[] {
+): PersonBalanceSummary[] {
   return people.map((person) => {
-    let received = 0;
-    let paid = 0;
-    let pendingReceive = 0;
-    let pendingPay = 0;
+    let balance = 0;
     for (const entry of entries) {
-      if (entry.personId !== person.id || entry.status === "void") continue;
-      if (entry.status === "pending") {
-        if (entry.kind === "expense") pendingReceive += entry.amount;
-        if (entry.kind === "refund") pendingPay += entry.amount;
-        continue;
-      }
-      if (entry.kind === "expense") received += entry.amount;
-      if (entry.kind === "income" || entry.kind === "refund") paid += entry.amount;
+      if (entry.personId !== person.id || entry.status !== "posted") continue;
+      if (entry.kind === "expense") balance -= entry.amount;
+      if (entry.kind === "income" || entry.kind === "refund") balance += entry.amount;
     }
     for (const transfer of transfers) {
-      if (transfer.status === "void") continue;
-      const isFrom = transfer.fromPersonId === person.id;
-      const isTo = transfer.toPersonId === person.id;
-      if (!isFrom && !isTo) continue;
-      if (transfer.status === "pending") {
-        if (isFrom) pendingPay += transfer.amount;
-        if (isTo) pendingReceive += transfer.amount;
-        continue;
-      }
-      if (isFrom) paid += transfer.amount;
-      if (isTo) received += transfer.amount;
+      if (transfer.status !== "posted") continue;
+      if (transfer.fromPersonId === person.id) balance -= transfer.amount;
+      if (transfer.toPersonId === person.id) balance += transfer.amount;
     }
-    return { person, received, paid, pendingReceive, pendingPay, net: received - paid };
-  }).sort((left, right) => right.net - left.net || left.person.name.localeCompare(right.person.name, "zh-Hant"));
+    return { person, balance };
+  }).sort((left, right) => right.balance - left.balance || left.person.name.localeCompare(right.person.name, "zh-Hant"));
 }

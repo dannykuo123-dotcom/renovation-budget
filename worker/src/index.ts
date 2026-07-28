@@ -196,7 +196,7 @@ function parseEntry(input: Record<string, unknown>): EntryInput {
 
 function parsePerson(input: Record<string, unknown>): PersonInput {
   const name = text(input.name, 60);
-  if (!name) throw new Error("???????");
+  if (!name) throw new Error("請輸入人員名稱");
   return {
     name,
     role: text(input.role, 40),
@@ -212,10 +212,10 @@ function parseTransfer(input: Record<string, unknown>): TransferInput {
   const fromPersonId = text(input.fromPersonId, 80);
   const toPersonId = text(input.toPersonId, 80);
   if (!amount || !/^\d{4}-\d{2}-\d{2}$/.test(occurredOn) || !["posted", "pending", "void"].includes(status)) {
-    throw new Error("??????????????");
+    throw new Error("資金移轉資料不完整或格式錯誤");
   }
   if (!fromPersonId || !toPersonId || fromPersonId === toPersonId) {
-    throw new Error("?????????????");
+    throw new Error("轉出人與轉入人必須是不同人員");
   }
   return {
     fromPersonId,
@@ -382,11 +382,11 @@ const mapTransfer = (row: Record<string, unknown>) => ({
 
 async function resolveEntryPerson(env: Env, projectId: string, input: EntryInput): Promise<EntryInput> {
   if (input.kind === "refund") return input;
-  if (!input.personId) throw new Error("???????");
+  if (!input.personId) throw new Error("請選擇人員");
   const person = await env.DB.prepare(
     "SELECT id, name FROM people WHERE id = ? AND project_id = ? AND active = 1",
   ).bind(input.personId, projectId).first<{ id: string; name: string }>();
-  if (!person) throw new Error("???????????");
+  if (!person) throw new Error("請選擇啟用中的人員");
   return { ...input, personId: person.id, counterparty: person.name };
 }
 
@@ -398,7 +398,7 @@ async function resolveTransferPeople(
   const result = await env.DB.prepare(
     "SELECT id FROM people WHERE project_id = ? AND active = 1 AND id IN (?, ?)",
   ).bind(projectId, input.fromPersonId, input.toPersonId).all<{ id: string }>();
-  if (result.results.length !== 2) throw new Error("??????????????????");
+  if (result.results.length !== 2) throw new Error("轉出人與轉入人都必須是啟用中的人員");
   return input;
 }
 async function validateRefundSource(
@@ -423,7 +423,7 @@ async function validateRefundSource(
   if ((reserved?.amount ?? 0) + input.amount > source.amount) {
     throw new Error("退款金額加上既有退款不可超過原始支出金額");
   }
-  if (!source.person_id) throw new Error("Original expense must have a person");
+  if (!source.person_id) throw new Error("原始支出必須先指定付款人");
   return { ...input, categoryId: source.category_id, personId: source.person_id, counterparty: source.counterparty };
 }
 
@@ -613,7 +613,7 @@ async function categories(request: Request, env: Env, projectId: string, categor
 }
 
 async function people(request: Request, env: Env, projectId: string, personId?: string): Promise<Response> {
-  if (!await findProject(projectId, env)) return json({ error: "Project not found" }, { status: 404 });
+  if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   if (!personId && request.method === "GET") {
     const result = await env.DB.prepare(
       "SELECT * FROM people WHERE project_id = ? ORDER BY active DESC, name",
@@ -658,7 +658,7 @@ async function people(request: Request, env: Env, projectId: string, personId?: 
     const usage = await env.DB.prepare(
       "SELECT (SELECT COUNT(*) FROM ledger_entries WHERE project_id = ? AND person_id = ?) + (SELECT COUNT(*) FROM fund_transfers WHERE project_id = ? AND (from_person_id = ? OR to_person_id = ?)) AS count",
     ).bind(projectId, personId, projectId, personId, personId).first<{ count: number }>();
-    if ((usage?.count ?? 0) > 0) return json({ error: "Referenced people can only be archived" }, { status: 409 });
+    if ((usage?.count ?? 0) > 0) return json({ error: "已被帳務或移轉引用的人員只能停用" }, { status: 409 });
     await env.DB.prepare("DELETE FROM people WHERE id = ? AND project_id = ?").bind(personId, projectId).run();
     await touchProject(projectId, env);
     return new Response(null, { status: 204 });
@@ -667,7 +667,7 @@ async function people(request: Request, env: Env, projectId: string, personId?: 
 }
 
 async function transfers(request: Request, env: Env, projectId: string, transferId?: string): Promise<Response> {
-  if (!await findProject(projectId, env)) return json({ error: "Project not found" }, { status: 404 });
+  if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   if (!transferId && request.method === "GET") {
     const result = await env.DB.prepare(
       "SELECT * FROM fund_transfers WHERE project_id = ? ORDER BY occurred_on DESC, created_at DESC",
@@ -903,38 +903,28 @@ async function exportCsv(env: Env, projectId: string): Promise<Response> {
 }
 
 async function exportCashflowCsv(env: Env, projectId: string): Promise<Response> {
-  if (!await findProject(projectId, env)) return json({ error: "Project not found" }, { status: 404 });
+  if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   const result = await env.DB.prepare(`
-    SELECT e.occurred_on, e.kind AS source_type,
-      CASE WHEN e.kind = 'expense' THEN '????' ELSE COALESCE(p.name, '???') END AS from_name,
-      CASE WHEN e.kind = 'expense' THEN '???' ELSE '????' END AS to_name,
-      CASE WHEN e.kind = 'expense' THEN '' ELSE COALESCE(p.role, '') END AS from_role,
-      CASE WHEN e.kind = 'expense' THEN COALESCE(p.role, '') ELSE '' END AS to_role,
-      e.status, e.amount, e.payment_method, e.note
-    FROM ledger_entries e
-    LEFT JOIN people p ON p.id = e.person_id
-    WHERE e.project_id = ? AND e.person_id IS NOT NULL
-    UNION ALL
-    SELECT t.occurred_on, 'transfer' AS source_type,
+    SELECT t.occurred_on,
       sender.name AS from_name, receiver.name AS to_name,
-      sender.role AS from_role, receiver.role AS to_role,
       t.status, t.amount, t.payment_method, t.note
     FROM fund_transfers t
     JOIN people sender ON sender.id = t.from_person_id
     JOIN people receiver ON receiver.id = t.to_person_id
     WHERE t.project_id = ?
-    ORDER BY occurred_on DESC
-  `).bind(projectId, projectId).all<Record<string, unknown>>();
-  const headers = ["??", "????", "???", "?????", "???", "?????", "??", "??", "????", "??"];
+    ORDER BY t.occurred_on DESC, t.created_at DESC
+  `).bind(projectId).all<Record<string, unknown>>();
+  const headers = ["日期", "轉出人", "轉入人", "狀態", "金額", "付款方式", "備註"];
+  const statusLabels: Record<string, string> = { posted: "已完成", pending: "待處理", void: "已作廢" };
   const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = "\uFEFF" + [headers, ...result.results.map((row) => [
-    row.occurred_on, row.source_type, row.from_name, row.from_role, row.to_name, row.to_role,
-    row.status, row.amount, row.payment_method, row.note,
+    row.occurred_on, row.from_name, row.to_name, statusLabels[String(row.status)] ?? row.status,
+    row.amount, row.payment_method, row.note,
   ])].map((row) => row.map(quote).join(",")).join("\n");
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": "attachment; filename*=UTF-8''rainbow-project-cashflow.csv",
+      "Content-Disposition": "attachment; filename*=UTF-8''rainbow-project-transfers.csv",
     },
   });
 }

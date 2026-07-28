@@ -21,7 +21,7 @@ import {
   updateProject,
   uploadAttachments,
 } from "./api";
-import { calculatePersonCashflows, calculateTotals, categorySpent, formatMoney } from "./finance";
+import { calculatePersonBalances, calculateTotals, categorySpent, formatMoney } from "./finance";
 import { parseRoute, projectRoute, projectsRoute, type ProjectView } from "./router";
 import type {
   Category,
@@ -42,14 +42,9 @@ let filterCategory = "";
 let filterStatus = "";
 let mobileFiltersOpen = false;
 let loading = false;
-type CashflowTab = "overview" | "records" | "people";
-let cashflowTab: CashflowTab = "overview";
-let cashflowPersonFilter = "";
-let cashflowStatusFilter = "";
-let cashflowTypeFilter = "";
 type SortDirection = "asc" | "desc";
 type BudgetSortKey = "sortOrder" | "name" | "planned" | "spent" | "remaining" | "percentage";
-type EntrySortKey = "occurredOn" | "description" | "category" | "counterparty" | "paymentMethod" | "status" | "amount";
+type EntrySortKey = "occurredOn" | "description" | "category" | "person" | "paymentMethod" | "status" | "amount";
 let budgetSortKey: BudgetSortKey = "sortOrder";
 let budgetSortDirection: SortDirection = "asc";
 let entrySortKey: EntrySortKey = "occurredOn";
@@ -83,7 +78,7 @@ function personById(id: string | null): Person | undefined {
 
 function personName(id: string | null): string {
   const person = personById(id);
-  return person ? `${person.name}${person.role ? `?${person.role}?` : ""}` : "???";
+  return person ? `${person.name}${person.role ? `（${person.role}）` : ""}` : "未指定";
 }
 
 function activePersonOptions(selectedId: string | null, includeInactive = false): string {
@@ -403,7 +398,7 @@ function renderBudget() {
 
 function entryFilters(entries: LedgerEntry[]) {
   return entries.filter((entry) =>
-    (!query || [entry.description, entry.counterparty, entry.note].join(" ").toLowerCase().includes(query.toLowerCase())) &&
+    (!query || [entry.description, personName(entry.personId), entry.note].join(" ").toLowerCase().includes(query.toLowerCase())) &&
     (!filterCategory || entry.categoryId === filterCategory) &&
     (!filterStatus ||
       (filterStatus === "expense-posted" && entry.kind === "expense" && entry.status === "posted") ||
@@ -427,13 +422,13 @@ function mobileFilterSummary(): string {
 
 function entryRow(entry: LedgerEntry, isFunding: boolean) {
   const source = originalExpense(entry);
-  return `<tr><td>${dateLabel(entry.occurredOn)}</td><td><strong>${esc(entry.description)}</strong>${source ? `<small class="attachment-count">原支出：${esc(source.description)}</small>` : ""}${entry.attachments.length ? `<small class="attachment-count">⌁ ${entry.attachments.length} 張憑證</small>` : ""}</td><td>${esc(isFunding ? entry.counterparty : categoryName(entry.categoryId))}</td><td>${esc((isFunding ? entry.paymentMethod : entry.counterparty) || "—")}</td><td><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span></td><td class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</td><td class="row-actions"><button data-action="edit-entry" data-id="${entry.id}">編輯</button><button data-action="delete-entry" data-id="${entry.id}">刪除</button></td></tr>`;
+  return `<tr><td>${dateLabel(entry.occurredOn)}</td><td><strong>${esc(entry.description)}</strong>${source ? `<small class="attachment-count">原支出：${esc(source.description)}</small>` : ""}${entry.attachments.length ? `<small class="attachment-count">⌁ ${entry.attachments.length} 張憑證</small>` : ""}</td><td>${esc(isFunding ? personName(entry.personId) : categoryName(entry.categoryId))}</td><td>${esc((isFunding ? entry.paymentMethod : personName(entry.personId)) || "—")}</td><td><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span></td><td class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</td><td class="row-actions"><button data-action="edit-entry" data-id="${entry.id}">編輯</button><button data-action="delete-entry" data-id="${entry.id}">刪除</button></td></tr>`;
 }
 
 function entryCard(entry: LedgerEntry, isFunding: boolean) {
   const context = isFunding
-    ? entry.counterparty || "未填來源"
-    : `${categoryName(entry.categoryId)} · ${entry.counterparty || "未填對象"}`;
+    ? `資金持有人：${personName(entry.personId)}`
+    : `${categoryName(entry.categoryId)} · 付款人：${personName(entry.personId)}`;
   return `<article class="mobile-record-card compact-entry-card">
     <div class="mobile-record-head"><div><small>${dateLabel(entry.occurredOn)}</small><strong>${esc(entry.description)}</strong></div><b class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</b></div>
     <div class="compact-entry-footer"><div class="compact-entry-meta"><span title="${esc(context)}">${esc(context)}</span><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span></div><div class="compact-entry-actions"><button data-action="edit-entry" data-id="${entry.id}" aria-label="編輯 ${esc(entry.description)}" title="編輯">✎</button><button class="danger-text" data-action="delete-entry" data-id="${entry.id}" aria-label="刪除 ${esc(entry.description)}" title="刪除">×</button></div></div>
@@ -447,8 +442,8 @@ function renderEntries(view: "expenses" | "funding") {
       const value = (entry: LedgerEntry): string | number => {
         if (entrySortKey === "occurredOn") return entry.occurredOn;
         if (entrySortKey === "description") return entry.description;
-        if (entrySortKey === "category") return isFunding ? entry.counterparty : categoryName(entry.categoryId);
-        if (entrySortKey === "counterparty") return entry.counterparty;
+        if (entrySortKey === "category") return isFunding ? personName(entry.personId) : categoryName(entry.categoryId);
+        if (entrySortKey === "person") return personName(entry.personId);
         if (entrySortKey === "paymentMethod") return entry.paymentMethod;
         if (entrySortKey === "status") return entryStatusText(entry);
         return entry.amount;
@@ -459,10 +454,10 @@ function renderEntries(view: "expenses" | "funding") {
   const categoryOptions = `<option value="">全部分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${filterCategory === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}`;
   const statusOptions = `<option value="">全部狀態</option><option value="expense-posted" ${filterStatus === "expense-posted" ? "selected" : ""}>已付款</option><option value="expense-pending" ${filterStatus === "expense-pending" ? "selected" : ""}>待付款</option><option value="refund-posted" ${filterStatus === "refund-posted" ? "selected" : ""}>已退款</option><option value="refund-pending" ${filterStatus === "refund-pending" ? "selected" : ""}>待退款</option>`;
   layout(`
-    <section class="page-actions"><p>${isFunding ? "記錄實際收到的匯款，金額會直接增加可用資金。" : "管理已付款、待付款、退款與工程憑證。"}</p><div class="entry-action-buttons">${isFunding ? "" : '<button class="secondary" data-action="new-entry" data-kind="refund">↩ 新增退貨</button>'}<button class="primary" data-action="new-entry" data-kind="${isFunding ? "income" : "expense"}">＋ 新增${isFunding ? "入帳" : "支出"}</button></div></section>
-    <section class="filters panel desktop-entry-filters"><label>搜尋<input id="search" placeholder="品項、對象或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<label>分類<select id="category-filter">${categoryOptions}</select></label><label>狀態<select id="status-filter">${statusOptions}</select></label>`}</section>
-    <section class="mobile-entry-filters"> <div class="mobile-filter-bar"><label><span class="sr-only">搜尋</span><input id="mobile-search" placeholder="搜尋品項、對象或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<button class="secondary mobile-filter-toggle" id="mobile-filter-toggle" aria-expanded="${mobileFiltersOpen}">${mobileFilterSummary()} ${mobileFiltersOpen ? "⌃" : "⌄"}</button>`}</div>${!isFunding ? `<div class="mobile-filter-options" ${mobileFiltersOpen ? "" : "hidden"}><label>分類<select id="mobile-category-filter">${categoryOptions}</select></label><label>狀態<select id="mobile-status-filter">${statusOptions}</select></label></div>` : ""}</section>
-    <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="entry-table"><thead><tr><th><button class="sort-button" data-sort-entry="occurredOn">日期 ${sortIndicator("occurredOn", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="description">品項 ${sortIndicator("description", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="category">${isFunding ? "來源" : "分類"} ${sortIndicator("category", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="${isFunding ? "paymentMethod" : "counterparty"}">${isFunding ? "付款方式" : "對象"} ${sortIndicator(isFunding ? "paymentMethod" : "counterparty", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="status">狀態 ${sortIndicator("status", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="amount">金額 ${sortIndicator("amount", entrySortKey, entrySortDirection)}</button></th><th></th></tr></thead><tbody>${entries.map((entry) => entryRow(entry, isFunding)).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的紀錄。</td></tr>'}</tbody></table></div></section>
+    <section class="page-actions"><p>${isFunding ? "記錄資金入帳並指定目前持有人，金額會增加他的手上餘額。" : "管理已付款、待付款、退款與工程憑證。"}</p><div class="entry-action-buttons">${isFunding ? "" : '<button class="secondary" data-action="new-entry" data-kind="refund">↩ 新增退貨</button>'}<button class="primary" data-action="new-entry" data-kind="${isFunding ? "income" : "expense"}">＋ 新增${isFunding ? "入帳" : "支出"}</button></div></section>
+    <section class="filters panel desktop-entry-filters"><label>搜尋<input id="search" placeholder="品項、人員或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<label>分類<select id="category-filter">${categoryOptions}</select></label><label>狀態<select id="status-filter">${statusOptions}</select></label>`}</section>
+    <section class="mobile-entry-filters"> <div class="mobile-filter-bar"><label><span class="sr-only">搜尋</span><input id="mobile-search" placeholder="搜尋品項、人員或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<button class="secondary mobile-filter-toggle" id="mobile-filter-toggle" aria-expanded="${mobileFiltersOpen}">${mobileFilterSummary()} ${mobileFiltersOpen ? "⌃" : "⌄"}</button>`}</div>${!isFunding ? `<div class="mobile-filter-options" ${mobileFiltersOpen ? "" : "hidden"}><label>分類<select id="mobile-category-filter">${categoryOptions}</select></label><label>狀態<select id="mobile-status-filter">${statusOptions}</select></label></div>` : ""}</section>
+    <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="entry-table"><thead><tr><th><button class="sort-button" data-sort-entry="occurredOn">日期 ${sortIndicator("occurredOn", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="description">品項 ${sortIndicator("description", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="category">${isFunding ? "資金持有人" : "分類"} ${sortIndicator("category", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="${isFunding ? "paymentMethod" : "person"}">${isFunding ? "付款方式" : "付款人／代墊人"} ${sortIndicator(isFunding ? "paymentMethod" : "person", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="status">狀態 ${sortIndicator("status", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="amount">金額 ${sortIndicator("amount", entrySortKey, entrySortDirection)}</button></th><th></th></tr></thead><tbody>${entries.map((entry) => entryRow(entry, isFunding)).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的紀錄。</td></tr>'}</tbody></table></div></section>
     <section class="mobile-record-list">${entries.map((entry) => entryCard(entry, isFunding)).join("") || '<div class="panel empty">目前沒有符合條件的紀錄。</div>'}</section>`, view);
   document.querySelector<HTMLInputElement>("#search")?.addEventListener("change", (event) => {
     query = (event.target as HTMLInputElement).value;
@@ -500,48 +495,48 @@ function renderEntries(view: "expenses" | "funding") {
   }));
 }
 
+function transferStatusText(status: FundTransfer["status"]): string {
+  return status === "posted" ? "已完成" : status === "pending" ? "待處理" : "已作廢";
+}
+
+function balanceLabel(balance: number): string {
+  return `${balance < 0 ? "代墊" : "手上"} ${formatMoney(Math.abs(balance))}`;
+}
+
 function renderCashflow() {
-  const summaries = calculatePersonCashflows(payload!.people, payload!.entries, payload!.transfers);
-  const entryFlows = payload!.entries.filter((entry) => entry.personId).map((entry) => {
-    const isExpense = entry.kind === "expense";
-    return { id: entry.id, source: entry.kind, occurredOn: entry.occurredOn, status: entry.status, amount: entry.amount, paymentMethod: entry.paymentMethod, note: entry.note, fromId: isExpense ? null : entry.personId, toId: isExpense ? entry.personId : null, direct: false };
-  });
-  const transferFlows = payload!.transfers.map((transfer) => ({
-    id: transfer.id, source: "transfer", occurredOn: transfer.occurredOn, status: transfer.status, amount: transfer.amount, paymentMethod: transfer.paymentMethod, note: transfer.note, fromId: transfer.fromPersonId, toId: transfer.toPersonId, direct: true,
-  }));
-  const rows = [...entryFlows, ...transferFlows].filter((row) =>
-    (!cashflowPersonFilter || row.fromId === cashflowPersonFilter || row.toId === cashflowPersonFilter) &&
-    (!cashflowStatusFilter || row.status === cashflowStatusFilter) &&
-    (!cashflowTypeFilter || row.source === cashflowTypeFilter),
-  ).sort((left, right) => right.occurredOn.localeCompare(left.occurredOn));
-  const tab = (id: CashflowTab, label: string) => `<button class="secondary ${cashflowTab === id ? "selected-tab" : ""}" data-cashflow-tab="${id}">${label}</button>`;
-  const tabs = `<section class="cashflow-tabs">${tab("overview", "\\u6982\\u6cc1")}${tab("records", "\\u7d00\\u9304")}${tab("people", "\\u4eba\\u54e1\\u7ba1\\u7406")}</section>`;
-  const personOptions = `<option value="">\\u5168\\u90e8\\u4eba\\u54e1</option>${payload!.people.map((person) => `<option value="${person.id}" ${cashflowPersonFilter === person.id ? "selected" : ""}>${esc(person.name)}</option>`).join("")}`;
-  const overview = `<section class="page-actions"><p>\\u6de8\\u984d\\u70ba\\u5df2\\u6536\\u6e1b\\u5df2\\u4ed8\\uff1b\\u5f85\\u8655\\u7406\\u91d1\\u984d\\u53e6\\u5217\\u986f\\u793a\\u3002</p><button class="primary" data-action="new-transfer">? \\u65b0\\u589e\\u79fb\\u8f49</button></section>
-    <section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>\\u4eba\\u54e1</th><th>\\u5df2\\u6536</th><th>\\u5df2\\u4ed8</th><th>\\u5f85\\u6536</th><th>\\u5f85\\u4ed8</th><th>\\u6de8\\u984d</th></tr></thead><tbody>${summaries.map((summary) => `<tr><td><strong>${esc(summary.person.name)}</strong>${summary.person.role ? `<small> ${esc(summary.person.role)}</small>` : ""}${summary.person.active ? "" : ' <span class="status void">\\u5df2\\u505c\\u7528</span>'}</td><td>${formatMoney(summary.received)}</td><td>${formatMoney(summary.paid)}</td><td>${formatMoney(summary.pendingReceive)}</td><td>${formatMoney(summary.pendingPay)}</td><td class="${summary.net < 0 ? "negative" : "income"}"><strong>${summary.net >= 0 ? "\\u6de8\\u6536 " : "\\u6de8\\u4ed8 "}${formatMoney(Math.abs(summary.net))}</strong></td></tr>`).join("") || '<tr><td colspan="6" class="empty">\\u8acb\\u5148\\u65b0\\u589e\\u4eba\\u54e1</td></tr>'}</tbody></table></div></section>`;
-  const records = `<section class="page-actions"><p>\\u5de5\\u7a0b\\u5e33\\u6236\\u53ca\\u4eba\\u54e1\\u9593\\u7684\\u5be6\\u969b\\u91d1\\u6d41\\u3002</p><div class="entry-action-buttons"><button class="secondary" data-action="export-cashflow">\\u4e0b\\u8f09 CSV</button><button class="primary" data-action="new-transfer">? \\u65b0\\u589e\\u79fb\\u8f49</button></div></section>
-    <section class="panel desktop-entry-filters"><label>\\u4eba\\u54e1<select id="cashflow-person-filter">${personOptions}</select></label><label>\\u4f86\\u6e90<select id="cashflow-type-filter"><option value="">\\u5168\\u90e8</option><option value="income" ${cashflowTypeFilter === "income" ? "selected" : ""}>\\u5165\\u5e33</option><option value="expense" ${cashflowTypeFilter === "expense" ? "selected" : ""}>\\u652f\\u51fa</option><option value="refund" ${cashflowTypeFilter === "refund" ? "selected" : ""}>\\u9000\\u6b3e</option><option value="transfer" ${cashflowTypeFilter === "transfer" ? "selected" : ""}>\\u4eba\\u54e1\\u79fb\\u8f49</option></select></label><label>\\u72c0\\u614b<select id="cashflow-status-filter"><option value="">\\u5168\\u90e8</option><option value="posted" ${cashflowStatusFilter === "posted" ? "selected" : ""}>\\u5df2\\u5b8c\\u6210</option><option value="pending" ${cashflowStatusFilter === "pending" ? "selected" : ""}>\\u5f85\\u8655\\u7406</option><option value="void" ${cashflowStatusFilter === "void" ? "selected" : ""}>\\u5df2\\u4f5c\\u5ee2</option></select></label></section>
-    <section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>\\u65e5\\u671f</th><th>\\u4f86\\u6e90</th><th>\\u4ed8\\u6b3e\\u65b9</th><th>\\u6536\\u6b3e\\u65b9</th><th>\\u72c0\\u614b</th><th>\\u91d1\\u984d</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr><td>${dateLabel(row.occurredOn)}</td><td>${row.source === "transfer" ? "\\u4eba\\u54e1\\u79fb\\u8f49" : kindLabel[row.source as EntryKind]}</td><td>${esc(row.fromId ? personName(row.fromId) : "\\u5de5\\u7a0b\\u5e33\\u6236")}</td><td>${esc(row.toId ? personName(row.toId) : "\\u5de5\\u7a0b\\u5e33\\u6236")}</td><td><span class="status ${row.status}">${row.status === "posted" ? "\\u5df2\\u5b8c\\u6210" : row.status === "pending" ? "\\u5f85\\u8655\\u7406" : "\\u5df2\\u4f5c\\u5ee2"}</span></td><td class="amount">${formatMoney(row.amount)}</td><td>${row.direct ? `<button data-action="edit-transfer" data-id="${row.id}">\\u7de8\\u8f2f</button><button data-action="delete-transfer" data-id="${row.id}">\\u522a\\u9664</button>` : '<small>\\u8acb\\u5f9e\\u6536\\u652f\\u7de8\\u8f2f</small>'}</td></tr>`).join("") || '<tr><td colspan="7" class="empty">\\u76ee\\u524d\\u6c92\\u6709\\u8cc7\\u91d1\\u6d41\\u7d00\\u9304</td></tr>'}</tbody></table></div></section>`;
-  const people = `<section class="page-actions"><p>\\u4eba\\u54e1\\u540d\\u55ae\\u50c5\\u5c6c\\u65bc\\u6b64\\u5de5\\u7a0b\\u3002\\u5df2\\u88ab\\u5f15\\u7528\\u7684\\u4eba\\u54e1\\u53ef\\u505c\\u7528\\uff0c\\u4f46\\u4e0d\\u53ef\\u522a\\u9664\\u3002</p><button class="primary" data-action="new-person">? \\u65b0\\u589e\\u4eba\\u54e1</button></section>
-    <section class="mobile-record-list">${payload!.people.map((person) => `<article class="mobile-record-card"><div class="mobile-record-head"><div><strong>${esc(person.name)}</strong><small>${esc(person.role || "\\u672a\\u5206\\u985e")}</small></div><span class="status ${person.active ? "posted" : "void"}">${person.active ? "\\u555f\\u7528" : "\\u5df2\\u505c\\u7528"}</span></div>${person.note ? `<p class="muted">${esc(person.note)}</p>` : ""}<div class="mobile-record-actions"><button data-action="edit-person" data-id="${person.id}">\\u7de8\\u8f2f</button><button data-action="delete-person" data-id="${person.id}">\\u522a\\u9664</button></div></article>`).join("") || '<div class="panel empty">\\u9084\\u6c92\\u6709\\u4eba\\u54e1</div>'}</section>`;
-  const decodeEscapes = (value: string) => value.replace(/\\u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
-  layout(decodeEscapes(`${tabs}${cashflowTab === "overview" ? overview : cashflowTab === "records" ? records : people}`), "cashflow");
-  document.querySelectorAll<HTMLButtonElement>("[data-cashflow-tab]").forEach((button) => button.addEventListener("click", () => { cashflowTab = button.dataset.cashflowTab as CashflowTab; renderCashflow(); }));
-  document.querySelector<HTMLSelectElement>("#cashflow-person-filter")?.addEventListener("change", (event) => { cashflowPersonFilter = (event.target as HTMLSelectElement).value; renderCashflow(); });
-  document.querySelector<HTMLSelectElement>("#cashflow-type-filter")?.addEventListener("change", (event) => { cashflowTypeFilter = (event.target as HTMLSelectElement).value; renderCashflow(); });
-  document.querySelector<HTMLSelectElement>("#cashflow-status-filter")?.addEventListener("change", (event) => { cashflowStatusFilter = (event.target as HTMLSelectElement).value; renderCashflow(); });
+  const balances = calculatePersonBalances(payload!.people, payload!.entries, payload!.transfers);
+  const transfers = [...payload!.transfers].sort((left, right) =>
+    right.occurredOn.localeCompare(left.occurredOn) || right.createdAt.localeCompare(left.createdAt));
+  const unassignedCount = payload!.entries.filter((entry) => entry.status === "posted" && !entry.personId).length;
+  const balanceRows = balances.map(({ person, balance }) => `<tr><td><strong>${esc(person.name)}</strong>${person.role ? `<small class="attachment-count">${esc(person.role)}</small>` : ""}${person.active ? "" : ' <span class="status void">已停用</span>'}</td><td><span class="balance-pill ${balance < 0 ? "advanced" : "held"}">${balanceLabel(balance)}</span></td><td class="row-actions"><button data-action="person-balance" data-id="${person.id}">查看明細</button></td></tr>`).join("");
+  const balanceCards = balances.map(({ person, balance }) => `<article class="mobile-record-card balance-mobile-card"><div class="mobile-record-head"><div><strong>${esc(person.name)}</strong><small>${esc(person.role || "未設定角色")}</small></div>${person.active ? "" : '<span class="status void">已停用</span>'}</div><strong class="balance-mobile-value ${balance < 0 ? "negative" : "income"}">${balanceLabel(balance)}</strong><div class="mobile-record-actions"><button data-action="person-balance" data-id="${person.id}">查看明細</button></div></article>`).join("");
+  const transferRows = transfers.map((transfer) => `<tr><td>${dateLabel(transfer.occurredOn)}</td><td><strong>${esc(personName(transfer.fromPersonId))}</strong></td><td><strong>${esc(personName(transfer.toPersonId))}</strong></td><td><span class="status ${transfer.status}">${transferStatusText(transfer.status)}</span></td><td class="amount">${formatMoney(transfer.amount)}</td><td>${esc(transfer.note || "—")}</td><td class="row-actions"><button data-action="edit-transfer" data-id="${transfer.id}">編輯</button><button data-action="delete-transfer" data-id="${transfer.id}">刪除</button></td></tr>`).join("");
+  const transferCards = transfers.map((transfer) => `<article class="mobile-record-card"><div class="mobile-record-head"><div><small>${dateLabel(transfer.occurredOn)}</small><strong>${esc(personName(transfer.fromPersonId))} → ${esc(personName(transfer.toPersonId))}</strong></div><b class="amount">${formatMoney(transfer.amount)}</b></div><div class="mobile-entry-meta"><span class="status ${transfer.status}">${transferStatusText(transfer.status)}</span>${transfer.note ? `<span>${esc(transfer.note)}</span>` : ""}</div><div class="mobile-record-actions"><button data-action="edit-transfer" data-id="${transfer.id}">編輯</button><button class="danger-text" data-action="delete-transfer" data-id="${transfer.id}">刪除</button></div></article>`).join("");
+  layout(`
+    <section class="page-actions cashflow-intro"><p>查看每個人目前保管的工程款；負數表示先以個人資金代墊。</p><button class="primary" data-action="new-transfer">↔ 新增資金移轉</button></section>
+    ${unassignedCount ? `<div class="cashflow-warning">有 ${unassignedCount} 筆已完成的歷史帳務尚未指定人員，暫不列入個人餘額；請到原帳務紀錄補選。</div>` : ""}
+    <section class="cashflow-section-heading"><div><p class="eyebrow">BALANCES</p><h3>人員手上餘額</h3></div><small>只計入已完成的入帳、支出、退款及資金移轉</small></section>
+    <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="compact-table"><thead><tr><th>人員</th><th>目前餘額</th><th></th></tr></thead><tbody>${balanceRows || '<tr><td colspan="3" class="empty">請先到工程設定新增人員</td></tr>'}</tbody></table></div></section>
+    <section class="mobile-record-list">${balanceCards || '<div class="panel empty">請先到工程設定新增人員</div>'}</section>
+    <section class="cashflow-section-heading transfer-heading"><div><p class="eyebrow">TRANSFERS</p><h3>人員間資金移轉</h3></div><button class="secondary" data-action="export-cashflow">下載移轉 CSV</button></section>
+    <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>日期</th><th>轉出人</th><th>轉入人</th><th>狀態</th><th>金額</th><th>備註</th><th></th></tr></thead><tbody>${transferRows || '<tr><td colspan="7" class="empty">目前沒有資金移轉紀錄</td></tr>'}</tbody></table></div></section>
+    <section class="mobile-record-list">${transferCards || '<div class="panel empty">目前沒有資金移轉紀錄</div>'}</section>`, "cashflow");
 }
 
 function renderSettings() {
   const project = payload!.project;
+  const peopleRows = payload!.people.map((person) => `<tr><td><strong>${esc(person.name)}</strong></td><td>${esc(person.role || "—")}</td><td><span class="status ${person.active ? "posted" : "void"}">${person.active ? "啟用" : "已停用"}</span></td><td>${esc(person.note || "—")}</td><td class="row-actions"><button data-action="edit-person" data-id="${person.id}">編輯</button><button data-action="delete-person" data-id="${person.id}">刪除</button></td></tr>`).join("");
+  const peopleCards = payload!.people.map((person) => `<article class="mobile-record-card"><div class="mobile-record-head"><div><strong>${esc(person.name)}</strong><small>${esc(person.role || "未設定角色")}</small></div><span class="status ${person.active ? "posted" : "void"}">${person.active ? "啟用" : "已停用"}</span></div>${person.note ? `<p class="muted">${esc(person.note)}</p>` : ""}<div class="mobile-record-actions"><button data-action="edit-person" data-id="${person.id}">編輯</button><button class="danger-text" data-action="delete-person" data-id="${person.id}">刪除</button></div></article>`).join("");
   layout(`
     <section class="settings-grid">
       <article class="panel setting-card"><p class="eyebrow">PROJECT</p><h3>${esc(project.name)}</h3><p class="muted">${project.address ? esc(project.address) : "尚未填寫地址"}<br>${projectStatusLabel[project.status]} · 最後更新 ${new Intl.DateTimeFormat("zh-TW", { dateStyle: "medium", timeStyle: "short" }).format(new Date(project.updatedAt))}</p><button class="secondary" data-action="edit-project">編輯工程資料</button></article>
       <article class="panel setting-card"><p class="eyebrow">EXPORT</p><h3>下載帳務紀錄</h3><p class="muted">CSV 可直接使用 Excel 或 Google 試算表開啟。</p><button class="secondary" data-action="export-project">下載 CSV</button></article>
       <article class="panel setting-card danger-zone"><p class="eyebrow">ARCHIVE</p><h3>${project.status === "archived" ? "重新啟用工程" : "封存工程案"}</h3><p class="muted">封存不會刪除帳務或照片，之後仍可重新啟用。</p><button class="secondary ${project.status === "archived" ? "" : "danger"}" data-action="${project.status === "archived" ? "restore-current-project" : "archive-current-project"}">${project.status === "archived" ? "重新啟用" : "封存工程"}</button></article>
-    </section>`, "settings");
+    </section>
+    <section class="page-actions settings-people-heading"><div><p class="eyebrow">PEOPLE</p><h3>人員管理</h3><p>人員僅屬於此工程；已被帳務或移轉引用的人員只能停用。</p></div><button class="primary" data-action="new-person">＋ 新增人員</button></section>
+    <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="compact-table"><thead><tr><th>姓名</th><th>角色</th><th>狀態</th><th>備註</th><th></th></tr></thead><tbody>${peopleRows || '<tr><td colspan="5" class="empty">目前還沒有人員</td></tr>'}</tbody></table></div></section>
+    <section class="mobile-record-list">${peopleCards || '<div class="panel empty">目前還沒有人員</div>'}</section>`, "settings");
 }
-
 function renderProjectPage(view: ProjectView) {
   if (!payload) return;
   if (view === "dashboard") renderDashboard();
@@ -676,6 +671,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     const remaining = entry.amount - refundReserved(entry.id, existing?.id);
     return `<option value="${entry.id}" ${entry.id === existing?.refundOfEntryId ? "selected" : ""}>${esc(entry.description)}（可退 ${formatMoney(remaining)}）</option>`;
   }).join("")}`;
+  const personLabel = kind === "income" ? "資金持有人" : "付款人／代墊人";
   openModal(`
     <div class="modal-head"><div><p class="eyebrow">${kindLabel[kind]}</p><h3>${existing ? "編輯紀錄" : `新增${kindLabel[kind]}`}</h3></div><button class="icon-button" data-action="close-modal">×</button></div>
     <form id="entry-form" class="form-grid">
@@ -685,8 +681,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       <label>日期<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
       <label class="full refund-source-field">原始支出<select name="refundOfEntryId">${refundSourceOptions}</select></label>
       <label>預算分類<select name="categoryId">${categoryOptions}</select></label>
-      <label>\u4eba\u54e1<select name="personId" required>${activePersonOptions(existing?.personId ?? null)}</select></label>
-      <label>對象<input name="counterparty" maxlength="60" value="${esc(existing?.counterparty ?? "")}" placeholder="廠商或匯款人" /></label>
+      <label>${personLabel}<select name="personId" required>${activePersonOptions(existing?.personId ?? null)}</select></label>
       <label>付款方式<select name="paymentMethod"><option value="">未指定</option>${["銀行轉帳", "現金", "信用卡", "電子支付"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
       <label>狀態<select name="status"></select></label>
       <p class="form-hint full"></p>
@@ -701,7 +696,6 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
   const categoryInput = formElement.elements.namedItem("categoryId") as HTMLSelectElement;
   const amountInput = formElement.elements.namedItem("amount") as HTMLInputElement;
   const descriptionInput = formElement.elements.namedItem("description") as HTMLInputElement;
-  const counterpartyInput = formElement.elements.namedItem("counterparty") as HTMLInputElement;
   const personInput = formElement.elements.namedItem("personId") as HTMLSelectElement;
   const paymentInput = formElement.elements.namedItem("paymentMethod") as HTMLSelectElement;
   const sourceField = formElement.querySelector<HTMLElement>(".refund-source-field")!;
@@ -717,7 +711,6 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     descriptionInput.value = `退貨：${source.description}`;
     categoryInput.value = source.categoryId ?? "";
     personInput.value = source.personId ?? "";
-    counterpartyInput.value = source.counterparty;
     paymentInput.value = source.paymentMethod;
     amountInput.max = String(source.amount - refundReserved(source.id, existing?.id));
   };
@@ -731,10 +724,10 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     sourceInput.required = isRefundKind;
     categoryInput.disabled = isRefundKind;
     hint.textContent = isRefundKind
-      ? "退款必須連結原始已付款支出；只有選擇「已退款」後，金額才會加回可用資金與預算餘額。"
+      ? "退款會加回原付款人的手上餘額；待退款在完成前不影響餘額。"
       : kindInput.value === "income"
-        ? "已入帳的資金會直接增加可用資金。"
-        : "支出只可記錄已付款或待付款；退貨請另建一筆退款紀錄。";
+        ? "已入帳的資金會增加所選持有人的手上餘額。"
+        : "已付款支出會從付款人的手上餘額扣除；退貨請另建退款紀錄。";
     if (isRefundKind && sourceInput.value) applySource();
     if (!isRefundKind) amountInput.removeAttribute("max");
   };
@@ -750,13 +743,14 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     }
     try {
       const projectId = currentProjectId();
-      const selectedPerson = personById(String(form.get("personId")) || null);
+      const selectedPersonId = personInput.value || null;
+      const selectedPerson = personById(selectedPersonId);
       const result = await saveEntry(projectId, {
         kind: String(form.get("kind")) as EntryKind,
         status: String(form.get("status")) as LedgerEntry["status"],
         refundOfEntryId: form.get("refundOfEntryId")?.toString() || null,
-        personId: String(form.get("personId")) || null,
-        counterparty: selectedPerson?.name ?? String(form.get("counterparty")).trim(),
+        personId: selectedPersonId,
+        counterparty: selectedPerson?.name ?? existing?.counterparty ?? "",
         description: String(form.get("description")).trim(),
         amount: Number(form.get("amount")),
         occurredOn: String(form.get("occurredOn")),
@@ -774,15 +768,52 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
   });
 }
 
+function openPersonBalanceModal(personId: string) {
+  const person = personById(personId);
+  if (!person) return toast("找不到此人員", "error");
+  const summary = calculatePersonBalances(payload!.people, payload!.entries, payload!.transfers)
+    .find((item) => item.person.id === personId);
+  const activities: Array<{ id: string; occurredOn: string; createdAt: string; label: string; note: string; delta: number }> = [];
+  for (const entry of payload!.entries) {
+    if (entry.personId !== personId || entry.status !== "posted") continue;
+    activities.push({
+      id: entry.id,
+      occurredOn: entry.occurredOn,
+      createdAt: entry.createdAt,
+      label: kindLabel[entry.kind],
+      note: entry.description,
+      delta: entry.kind === "expense" ? -entry.amount : entry.amount,
+    });
+  }
+  for (const transfer of payload!.transfers) {
+    if (transfer.status !== "posted") continue;
+    if (transfer.fromPersonId === personId) {
+      activities.push({ id: transfer.id, occurredOn: transfer.occurredOn, createdAt: transfer.createdAt, label: "轉出", note: `轉給 ${personName(transfer.toPersonId)}`, delta: -transfer.amount });
+    }
+    if (transfer.toPersonId === personId) {
+      activities.push({ id: transfer.id, occurredOn: transfer.occurredOn, createdAt: transfer.createdAt, label: "轉入", note: `收到 ${personName(transfer.fromPersonId)} 移轉`, delta: transfer.amount });
+    }
+  }
+  let runningBalance = 0;
+  const history = activities
+    .sort((left, right) => left.occurredOn.localeCompare(right.occurredOn) || left.createdAt.localeCompare(right.createdAt))
+    .map((activity) => ({ ...activity, runningBalance: runningBalance += activity.delta }))
+    .reverse();
+  openModal(`
+    <div class="modal-head"><div><p class="eyebrow">BALANCE</p><h3>${esc(person.name)}的餘額明細</h3></div><button class="icon-button" data-action="close-modal" aria-label="關閉">×</button></div>
+    <div class="person-balance-summary ${summary && summary.balance < 0 ? "advanced" : "held"}"><small>目前餘額</small><strong>${balanceLabel(summary?.balance ?? 0)}</strong></div>
+    <div class="table-wrap balance-history"><table><thead><tr><th>日期</th><th>類型／內容</th><th>增減</th><th>當時餘額</th></tr></thead><tbody>${history.map((activity) => `<tr><td>${dateLabel(activity.occurredOn)}</td><td><strong>${activity.label}</strong><small class="attachment-count">${esc(activity.note)}</small></td><td class="amount ${activity.delta < 0 ? "negative" : "income"}">${activity.delta < 0 ? "−" : "+"}${formatMoney(Math.abs(activity.delta))}</td><td>${formatMoney(activity.runningBalance)}</td></tr>`).join("") || '<tr><td colspan="4" class="empty">目前沒有已完成的餘額異動</td></tr>'}</tbody></table></div>`);
+}
+
 function openPersonModal(existing?: Person) {
   openModal(`
-    <div class="modal-head"><div><p class="eyebrow">PERSON</p><h3>${existing ? "Edit person" : "Add person"}</h3></div><button class="icon-button" data-action="close-modal">?</button></div>
+    <div class="modal-head"><div><p class="eyebrow">PERSON</p><h3>${existing ? "編輯人員" : "新增人員"}</h3></div><button class="icon-button" data-action="close-modal" aria-label="關閉">×</button></div>
     <form id="person-form" class="form-grid">
-      <label>Name<input name="name" maxlength="60" required value="${esc(existing?.name ?? "")}" autofocus /></label>
-      <label>Role<input name="role" maxlength="40" value="${esc(existing?.role ?? "")}" placeholder="Owner, vendor..." /></label>
-      <label class="full">Note<textarea name="note" maxlength="500">${esc(existing?.note ?? "")}</textarea></label>
-      <label><input name="active" type="checkbox" ${existing?.active === false ? "" : "checked"} /> Active</label>
-      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">Cancel</button><button class="primary" type="submit">Save</button></div>
+      <label>姓名<input name="name" maxlength="60" required value="${esc(existing?.name ?? "")}" autofocus /></label>
+      <label>角色<input name="role" maxlength="40" value="${esc(existing?.role ?? "")}" placeholder="例如：屋主、水電工" /></label>
+      <label class="full">備註<textarea name="note" maxlength="500">${esc(existing?.note ?? "")}</textarea></label>
+      <label class="checkbox-label"><input name="active" type="checkbox" ${existing?.active === false ? "" : "checked"} /> 啟用此人員</label>
+      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存人員</button></div>
     </form>`);
   document.querySelector<HTMLFormElement>("#person-form")!.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -791,25 +822,25 @@ function openPersonModal(existing?: Person) {
       await savePerson(currentProjectId(), { name: String(form.get("name")).trim(), role: String(form.get("role")).trim(), note: String(form.get("note")).trim(), active: form.get("active") === "on" }, existing?.id);
       document.querySelector(".modal-backdrop")?.remove();
       await refresh();
-      toast("Saved");
-    } catch (reason) { toast(reason instanceof Error ? reason.message : "Save failed", "error"); }
+      toast("人員已儲存");
+    } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
   });
 }
 
 function openTransferModal(existing?: FundTransfer) {
   const active = payload!.people.filter((person) => person.active || person.id === existing?.fromPersonId || person.id === existing?.toPersonId);
-  const optionList = (selected: string | undefined) => `<option value="">Select person</option>${active.map((person) => `<option value="${person.id}" ${person.id === selected ? "selected" : ""}>${esc(person.name)}${person.role ? ` (${esc(person.role)})` : ""}</option>`).join("")}`;
+  const optionList = (selected: string | undefined) => `<option value="">請選擇人員</option>${active.map((person) => `<option value="${person.id}" ${person.id === selected ? "selected" : ""}>${esc(person.name)}${person.role ? `（${esc(person.role)}）` : ""}${person.active ? "" : "（已停用）"}</option>`).join("")}`;
   openModal(`
-    <div class="modal-head"><div><p class="eyebrow">CASH FLOW</p><h3>${existing ? "Edit transfer" : "New transfer"}</h3></div><button class="icon-button" data-action="close-modal">?</button></div>
+    <div class="modal-head"><div><p class="eyebrow">TRANSFER</p><h3>${existing ? "編輯資金移轉" : "新增資金移轉"}</h3></div><button class="icon-button" data-action="close-modal" aria-label="關閉">×</button></div>
     <form id="transfer-form" class="form-grid">
-      <label>From<select name="fromPersonId" required>${optionList(existing?.fromPersonId)}</select></label>
-      <label>To<select name="toPersonId" required>${optionList(existing?.toPersonId)}</select></label>
-      <label>Amount<input name="amount" type="number" min="1" step="1" required value="${existing?.amount ?? ""}" /></label>
-      <label>Date<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
-      <label>Payment method<select name="paymentMethod"><option value="">Unspecified</option>${["????", "??", "???", "????"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
-      <label>Status<select name="status"><option value="posted" ${existing?.status !== "pending" && existing?.status !== "void" ? "selected" : ""}>Completed</option><option value="pending" ${existing?.status === "pending" ? "selected" : ""}>Pending</option><option value="void" ${existing?.status === "void" ? "selected" : ""}>Void</option></select></label>
-      <label class="full">Note<textarea name="note" maxlength="500">${esc(existing?.note ?? "")}</textarea></label>
-      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">Cancel</button><button class="primary" type="submit">Save transfer</button></div>
+      <label>轉出人<select name="fromPersonId" required>${optionList(existing?.fromPersonId)}</select></label>
+      <label>轉入人<select name="toPersonId" required>${optionList(existing?.toPersonId)}</select></label>
+      <label>金額<input name="amount" type="number" min="1" step="1" required value="${existing?.amount ?? ""}" /></label>
+      <label>日期<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
+      <label>付款方式<select name="paymentMethod"><option value="">未指定</option>${["銀行轉帳", "現金", "信用卡", "電子支付"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
+      <label>狀態<select name="status"><option value="posted" ${existing?.status !== "pending" && existing?.status !== "void" ? "selected" : ""}>已完成</option><option value="pending" ${existing?.status === "pending" ? "selected" : ""}>待處理</option><option value="void" ${existing?.status === "void" ? "selected" : ""}>已作廢</option></select></label>
+      <label class="full">備註<textarea name="note" maxlength="500">${esc(existing?.note ?? "")}</textarea></label>
+      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存移轉</button></div>
     </form>`);
   document.querySelector<HTMLFormElement>("#transfer-form")!.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -818,11 +849,10 @@ function openTransferModal(existing?: FundTransfer) {
       await saveTransfer(currentProjectId(), { fromPersonId: String(form.get("fromPersonId")), toPersonId: String(form.get("toPersonId")), amount: Number(form.get("amount")), occurredOn: String(form.get("occurredOn")), status: String(form.get("status")) as FundTransfer["status"], paymentMethod: String(form.get("paymentMethod")), note: String(form.get("note")).trim() }, existing?.id);
       document.querySelector(".modal-backdrop")?.remove();
       await refresh();
-      toast("Saved");
-    } catch (reason) { toast(reason instanceof Error ? reason.message : "Save failed", "error"); }
+      toast("資金移轉已儲存");
+    } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
   });
 }
-
 function bindCommon() {
   document.querySelectorAll<HTMLElement>("[data-action]").forEach((button) => button.addEventListener("click", async () => {
     const action = button.dataset.action;
@@ -888,19 +918,20 @@ function bindCommon() {
     }
     if (action === "export-cashflow") {
       try { await downloadCashflowCsv(currentProjectId(), payload!.project.name); }
-      catch (reason) { toast(reason instanceof Error ? reason.message : "Download failed", "error"); }
+      catch (reason) { toast(reason instanceof Error ? reason.message : "下載失敗", "error"); }
     }
     if (action === "new-person") openPersonModal();
     if (action === "edit-person") openPersonModal(payload!.people.find((person) => person.id === button.dataset.id));
-    if (action === "delete-person" && confirm("Delete this person? Referenced people can be archived instead.")) {
-      try { await deletePerson(currentProjectId(), button.dataset.id!); await refresh(); toast("Deleted"); }
-      catch (reason) { toast(reason instanceof Error ? reason.message : "Delete failed", "error"); }
+    if (action === "delete-person" && confirm("確定永久刪除此人員嗎？已被引用的人員只能改為停用。")) {
+      try { await deletePerson(currentProjectId(), button.dataset.id!); await refresh(); toast("人員已刪除"); }
+      catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
     }
+    if (action === "person-balance") openPersonBalanceModal(button.dataset.id!);
     if (action === "new-transfer") openTransferModal();
     if (action === "edit-transfer") openTransferModal(payload!.transfers.find((transfer) => transfer.id === button.dataset.id));
-    if (action === "delete-transfer" && confirm("Delete this transfer?")) {
-      try { await deleteTransfer(currentProjectId(), button.dataset.id!); await refresh(); toast("Deleted"); }
-      catch (reason) { toast(reason instanceof Error ? reason.message : "Delete failed", "error"); }
+    if (action === "delete-transfer" && confirm("確定刪除此筆資金移轉嗎？")) {
+      try { await deleteTransfer(currentProjectId(), button.dataset.id!); await refresh(); toast("資金移轉已刪除"); }
+      catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
     }
   }));
 }
