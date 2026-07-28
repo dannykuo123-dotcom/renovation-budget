@@ -83,8 +83,8 @@ function personName(id: string | null): string {
 
 function activePersonOptions(selectedId: string | null, includeInactive = false): string {
   const people = payload!.people.filter((person) => person.active || person.id === selectedId || includeInactive);
-  return `<option value="">\u8acb\u9078\u64c7\u4eba\u54e1</option>${people.map((person) =>
-    `<option value="${person.id}" ${person.id === selectedId ? "selected" : ""}>${esc(person.name)}${person.role ? `\uff08${esc(person.role)}\uff09` : ""}${person.active ? "" : "\uff08\u5df2\u505c\u7528\uff09"}</option>`,
+  return `<option value="">請選擇人員</option>${people.map((person) =>
+    `<option value="${person.id}" ${person.id === selectedId ? "selected" : ""}>${esc(person.name)}${person.role ? `（${esc(person.role)}）` : ""}${person.active ? "" : "（已停用）"}</option>`,
   ).join("")}`;
 }
 
@@ -452,7 +452,7 @@ function renderEntries(view: "expenses" | "funding") {
       return entrySortDirection === "asc" ? compare : -compare;
     });
   const categoryOptions = `<option value="">全部分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${filterCategory === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}`;
-  const statusOptions = `<option value="">全部狀態</option><option value="expense-posted" ${filterStatus === "expense-posted" ? "selected" : ""}>已付款</option><option value="expense-pending" ${filterStatus === "expense-pending" ? "selected" : ""}>待付款</option><option value="refund-posted" ${filterStatus === "refund-posted" ? "selected" : ""}>已退款</option><option value="refund-pending" ${filterStatus === "refund-pending" ? "selected" : ""}>待退款</option>`;
+  const statusOptions = `<option value="">全部狀態</option><option value="expense-posted" ${filterStatus === "expense-posted" ? "selected" : ""}>已付款</option><option value="refund-posted" ${filterStatus === "refund-posted" ? "selected" : ""}>已退款</option><option value="refund-pending" ${filterStatus === "refund-pending" ? "selected" : ""}>待退款</option>`;
   layout(`
     <section class="page-actions"><p>${isFunding ? "記錄資金入帳並指定目前持有人，金額會增加他的手上餘額。" : "管理已付款、待付款、退款與工程憑證。"}</p><div class="entry-action-buttons">${isFunding ? "" : '<button class="secondary" data-action="new-entry" data-kind="refund">↩ 新增退貨</button>'}<button class="primary" data-action="new-entry" data-kind="${isFunding ? "income" : "expense"}">＋ 新增${isFunding ? "入帳" : "支出"}</button></div></section>
     <section class="filters panel desktop-entry-filters"><label>搜尋<input id="search" placeholder="品項、人員或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<label>分類<select id="category-filter">${categoryOptions}</select></label><label>狀態<select id="status-filter">${statusOptions}</select></label>`}</section>
@@ -704,7 +704,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     ? `<option value="posted" selected>已入帳</option>`
     : kindInput.value === "refund"
       ? `<option value="posted" ${selected === "posted" ? "selected" : ""}>已退款</option><option value="pending" ${selected === "pending" ? "selected" : ""}>待退款</option>`
-      : `<option value="posted" ${selected === "posted" ? "selected" : ""}>已付款</option><option value="pending" ${selected === "pending" ? "selected" : ""}>待付款</option>`;
+      : `<option value="posted" selected>已付款</option>`;
   const applySource = () => {
     const source = payload!.entries.find((entry) => entry.id === sourceInput.value);
     if (!source) return;
@@ -715,7 +715,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
     amountInput.max = String(source.amount - refundReserved(source.id, existing?.id));
   };
   const sync = () => {
-    const selected = statusInput.value || (existing?.status === "pending" ? "pending" : "posted");
+    const selected = kindInput.value === "expense" ? "posted" : (statusInput.value || (existing?.status === "pending" ? "pending" : "posted"));
     statusInput.innerHTML = statusOptions(selected);
     const isRefundKind = kindInput.value === "refund";
     sourceField.hidden = !isRefundKind;

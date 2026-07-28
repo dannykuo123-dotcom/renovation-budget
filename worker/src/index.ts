@@ -176,6 +176,7 @@ function parseEntry(input: Record<string, unknown>): EntryInput {
   const description = text(input.description, 80);
   if (!description) throw new Error("請輸入品項或用途");
   if (kind === "income" && status !== "posted") throw new Error("資金入帳只能標記為已入帳");
+  if (kind === "expense" && status !== "posted") throw new Error("支出只能標記為已付款");
   const refundOfEntryId = text(input.refundOfEntryId, 80) || null;
   if (kind === "refund" && !refundOfEntryId) throw new Error("請選擇原始支出紀錄");
   if (kind !== "refund" && refundOfEntryId) throw new Error("只有退款紀錄可以連結原始支出");
@@ -625,7 +626,7 @@ async function people(request: Request, env: Env, projectId: string, personId?: 
     const duplicate = await env.DB.prepare(
       "SELECT id FROM people WHERE project_id = ? AND name = ? COLLATE NOCASE",
     ).bind(projectId, input.name).first();
-    if (duplicate) return json({ error: "A person with this name already exists" }, { status: 409 });
+    if (duplicate) return json({ error: "已有相同名稱的人員" }, { status: 409 });
     const id = newId();
     const timestamp = now();
     await env.DB.prepare(
@@ -635,17 +636,17 @@ async function people(request: Request, env: Env, projectId: string, personId?: 
     const result = await env.DB.prepare("SELECT * FROM people WHERE id = ?").bind(id).first<Record<string, unknown>>();
     return json(mapPerson(result!), { status: 201 });
   }
-  if (!personId) return json({ error: "Person operation not found" }, { status: 404 });
+  if (!personId) return json({ error: "找不到人員操作" }, { status: 404 });
   const existing = await env.DB.prepare(
     "SELECT * FROM people WHERE id = ? AND project_id = ?",
   ).bind(personId, projectId).first<Record<string, unknown>>();
-  if (!existing) return json({ error: "Person not found" }, { status: 404 });
+  if (!existing) return json({ error: "找不到此人員" }, { status: 404 });
   if (request.method === "PATCH") {
     const input = parsePerson(await requireJson(request));
     const duplicate = await env.DB.prepare(
       "SELECT id FROM people WHERE project_id = ? AND name = ? COLLATE NOCASE AND id != ?",
     ).bind(projectId, input.name, personId).first();
-    if (duplicate) return json({ error: "A person with this name already exists" }, { status: 409 });
+    if (duplicate) return json({ error: "已有相同名稱的人員" }, { status: 409 });
     const timestamp = now();
     await env.DB.prepare(
       "UPDATE people SET name = ?, role = ?, note = ?, active = ?, updated_at = ? WHERE id = ? AND project_id = ?",
@@ -663,7 +664,7 @@ async function people(request: Request, env: Env, projectId: string, personId?: 
     await touchProject(projectId, env);
     return new Response(null, { status: 204 });
   }
-  return json({ error: "Method not allowed" }, { status: 405 });
+  return json({ error: "不支援的方法" }, { status: 405 });
 }
 
 async function transfers(request: Request, env: Env, projectId: string, transferId?: string): Promise<Response> {
@@ -685,11 +686,11 @@ async function transfers(request: Request, env: Env, projectId: string, transfer
     const result = await env.DB.prepare("SELECT * FROM fund_transfers WHERE id = ?").bind(id).first<Record<string, unknown>>();
     return json(mapTransfer(result!), { status: 201 });
   }
-  if (!transferId) return json({ error: "Transfer operation not found" }, { status: 404 });
+  if (!transferId) return json({ error: "找不到資金移轉操作" }, { status: 404 });
   const existing = await env.DB.prepare(
     "SELECT id FROM fund_transfers WHERE id = ? AND project_id = ?",
   ).bind(transferId, projectId).first();
-  if (!existing) return json({ error: "Transfer not found" }, { status: 404 });
+  if (!existing) return json({ error: "找不到此筆資金移轉" }, { status: 404 });
   if (request.method === "PATCH") {
     const input = await resolveTransferPeople(env, projectId, parseTransfer(await requireJson(request)));
     const timestamp = now();
@@ -705,7 +706,7 @@ async function transfers(request: Request, env: Env, projectId: string, transfer
     await touchProject(projectId, env);
     return new Response(null, { status: 204 });
   }
-  return json({ error: "Method not allowed" }, { status: 405 });
+  return json({ error: "不支援的方法" }, { status: 405 });
 }
 
 
