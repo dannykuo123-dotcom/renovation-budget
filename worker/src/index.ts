@@ -6,14 +6,13 @@ export interface Env {
   SESSION_SIGNING_SECRET: string;
 }
 
-type EntryKind = "income" | "expense" | "refund";
+type EntryKind = "income" | "expense";
 type EntryStatus = "posted" | "pending" | "void";
 type TransferStatus = "posted" | "pending" | "void";
 type ProjectStatus = "active" | "completed" | "archived";
 type EntryInput = {
   kind: EntryKind;
   status: EntryStatus;
-  refundOfEntryId: string | null;
   description: string;
   amount: number;
   occurredOn: string;
@@ -166,7 +165,7 @@ function parseEntry(input: Record<string, unknown>): EntryInput {
   const amount = parseMoney(input.amount);
   const occurredOn = text(input.occurredOn, 10);
   if (
-    !["income", "expense", "refund"].includes(String(kind)) ||
+    !["income", "expense"].includes(String(kind)) ||
     !["posted", "pending"].includes(String(status)) ||
     !amount ||
     !/^\d{4}-\d{2}-\d{2}$/.test(occurredOn)
@@ -177,13 +176,9 @@ function parseEntry(input: Record<string, unknown>): EntryInput {
   if (!description) throw new Error("請輸入品項或用途");
   if (kind === "income" && status !== "posted") throw new Error("資金入帳只能標記為已入帳");
   if (kind === "expense" && status !== "posted") throw new Error("支出只能標記為已付款");
-  const refundOfEntryId = text(input.refundOfEntryId, 80) || null;
-  if (kind === "refund" && !refundOfEntryId) throw new Error("請選擇原始支出紀錄");
-  if (kind !== "refund" && refundOfEntryId) throw new Error("只有退款紀錄可以連結原始支出");
   return {
     kind: kind as EntryKind,
     status: status as EntryStatus,
-    refundOfEntryId,
     description,
     amount,
     occurredOn,
@@ -344,7 +339,6 @@ const mapEntry = (row: Record<string, unknown>, attachments: Record<string, unkn
   id: row.id,
   kind: row.kind,
   status: row.status,
-  refundOfEntryId: row.refund_of_entry_id,
   description: row.description,
   amount: row.amount,
   occurredOn: row.occurred_on,
@@ -382,7 +376,6 @@ const mapTransfer = (row: Record<string, unknown>) => ({
 });
 
 async function resolveEntryPerson(env: Env, projectId: string, input: EntryInput): Promise<EntryInput> {
-  if (input.kind === "refund") return input;
   if (!input.personId) throw new Error("請選擇人員");
   const person = await env.DB.prepare(
     "SELECT id, name FROM people WHERE id = ? AND project_id = ? AND active = 1",
@@ -402,53 +395,6 @@ async function resolveTransferPeople(
   if (result.results.length !== 2) throw new Error("轉出人與轉入人都必須是啟用中的人員");
   return input;
 }
-async function validateRefundSource(
-  env: Env,
-  projectId: string,
-  input: EntryInput,
-  editingEntryId?: string,
-): Promise<EntryInput> {
-  if (input.kind !== "refund") return input;
-  const source = await env.DB.prepare(`
-    SELECT id, amount, category_id, person_id, counterparty
-    FROM ledger_entries
-    WHERE id = ? AND project_id = ? AND kind = 'expense' AND status = 'posted'
-  `).bind(input.refundOfEntryId, projectId).first<{ id: string; amount: number; category_id: string | null; person_id: string | null; counterparty: string }>();
-  if (!source) throw new Error("退款只能連結同工程案的一筆已付款支出");
-  const reserved = await env.DB.prepare(`
-    SELECT COALESCE(SUM(amount), 0) AS amount
-    FROM ledger_entries
-    WHERE project_id = ? AND kind = 'refund' AND refund_of_entry_id = ?
-      AND status IN ('posted', 'pending') AND id != ?
-  `).bind(projectId, source.id, editingEntryId ?? "").first<{ amount: number }>();
-  if ((reserved?.amount ?? 0) + input.amount > source.amount) {
-    throw new Error("退款金額加上既有退款不可超過原始支出金額");
-  }
-  if (!source.person_id) throw new Error("原始支出必須先指定付款人");
-  return { ...input, categoryId: source.category_id, personId: source.person_id, counterparty: source.counterparty };
-}
-
-async function validateExpenseChange(
-  env: Env,
-  projectId: string,
-  entryId: string,
-  input: EntryInput,
-): Promise<void> {
-  const linked = await env.DB.prepare(`
-    SELECT COALESCE(SUM(amount), 0) AS amount
-    FROM ledger_entries
-    WHERE project_id = ? AND kind = 'refund' AND refund_of_entry_id = ? AND status IN ('posted', 'pending')
-  `).bind(projectId, entryId).first<{ amount: number }>();
-  const refundedAmount = linked?.amount ?? 0;
-  if (!refundedAmount) return;
-  if (input.kind !== "expense" || input.status !== "posted") {
-    throw new Error("已有退款的原始支出必須維持已付款狀態");
-  }
-  if (input.amount < refundedAmount) {
-    throw new Error("原始支出金額不可低於已建立的退款合計");
-  }
-}
-
 async function findProject(projectId: string, env: Env): Promise<Record<string, unknown> | null> {
   return env.DB.prepare("SELECT * FROM projects WHERE id = ?").bind(projectId).first<Record<string, unknown>>();
 }
@@ -463,7 +409,7 @@ async function projectCollection(request: Request, env: Env): Promise<Response> 
       SELECT p.*,
         COALESCE((SELECT SUM(c.planned_amount) FROM budget_categories c WHERE c.project_id = p.id), 0) AS planned,
         COALESCE((SELECT SUM(e.amount) FROM ledger_entries e WHERE e.project_id = p.id AND e.kind = 'income' AND e.status = 'posted'), 0) AS received,
-        COALESCE((SELECT SUM(CASE WHEN e.kind = 'expense' THEN e.amount WHEN e.kind = 'refund' THEN -e.amount ELSE 0 END)
+        COALESCE((SELECT SUM(CASE WHEN e.kind = 'expense' THEN e.amount ELSE 0 END)
           FROM ledger_entries e WHERE e.project_id = p.id AND e.status = 'posted'), 0) AS spent,
         COALESCE((SELECT SUM(e.amount) FROM ledger_entries e WHERE e.project_id = p.id AND e.kind = 'expense' AND e.status = 'pending'), 0) AS pending
       FROM projects p
@@ -724,9 +670,7 @@ async function entries(request: Request, env: Env, projectId: string, entryId?: 
     return json(entryResult.results.map((entry) => mapEntry(entry, attachmentResult.results)));
   }
   if (!entryId && request.method === "POST") {
-    let input = parseEntry(await requireJson(request));
-    input = await validateRefundSource(env, projectId, input);
-    input = await resolveEntryPerson(env, projectId, input);
+    const input = await resolveEntryPerson(env, projectId, parseEntry(await requireJson(request)));
     if (input.categoryId) {
       const exists = await env.DB.prepare(
         "SELECT id FROM budget_categories WHERE id = ? AND project_id = ?",
@@ -740,7 +684,7 @@ async function entries(request: Request, env: Env, projectId: string, entryId?: 
         (id, project_id, kind, status, refund_of_entry_id, description, amount, occurred_on, category_id, person_id, counterparty, payment_method, note, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
-      id, projectId, input.kind, input.status, input.refundOfEntryId, input.description, input.amount, input.occurredOn,
+      id, projectId, input.kind, input.status, null, input.description, input.amount, input.occurredOn,
       input.categoryId, input.personId, input.counterparty, input.paymentMethod, input.note, timestamp, timestamp,
     ).run();
     await touchProject(projectId, env);
@@ -752,10 +696,7 @@ async function entries(request: Request, env: Env, projectId: string, entryId?: 
   ).bind(entryId, projectId).first<{ id: string; kind: EntryKind }>();
   if (!existing) return json({ error: "找不到此紀錄" }, { status: 404 });
   if (request.method === "PATCH") {
-    let input = parseEntry(await requireJson(request));
-    input = await validateRefundSource(env, projectId, input, entryId);
-    input = await resolveEntryPerson(env, projectId, input);
-    if (existing.kind === "expense") await validateExpenseChange(env, projectId, entryId, input);
+    const input = await resolveEntryPerson(env, projectId, parseEntry(await requireJson(request)));
     if (input.categoryId) {
       const category = await env.DB.prepare(
         "SELECT id FROM budget_categories WHERE id = ? AND project_id = ?",
@@ -765,18 +706,13 @@ async function entries(request: Request, env: Env, projectId: string, entryId?: 
     const timestamp = now();
     await env.DB.prepare(`
       UPDATE ledger_entries SET
-        kind = ?, status = ?, refund_of_entry_id = ?, description = ?, amount = ?, occurred_on = ?, category_id = ?,
+        kind = ?, status = ?, refund_of_entry_id = NULL, description = ?, amount = ?, occurred_on = ?, category_id = ?,
         person_id = ?, counterparty = ?, payment_method = ?, note = ?, updated_at = ?
       WHERE id = ? AND project_id = ?
     `).bind(
-      input.kind, input.status, input.refundOfEntryId, input.description, input.amount, input.occurredOn, input.categoryId,
+      input.kind, input.status, input.description, input.amount, input.occurredOn, input.categoryId,
       input.personId, input.counterparty, input.paymentMethod, input.note, timestamp, entryId, projectId,
     ).run();
-    if (input.kind === "expense") {
-      await env.DB.prepare(
-        "UPDATE ledger_entries SET person_id = ?, counterparty = ?, updated_at = ? WHERE project_id = ? AND refund_of_entry_id = ?",
-      ).bind(input.personId, input.counterparty, timestamp, projectId, entryId).run();
-    }
     await touchProject(projectId, env);
     const attachments = await env.DB.prepare(
       "SELECT id, entry_id, filename, content_type, size, created_at FROM attachments WHERE entry_id = ?",
@@ -784,19 +720,23 @@ async function entries(request: Request, env: Env, projectId: string, entryId?: 
     return json({ id: entryId, ...input, attachments: attachments.results.map(mapAttachment), updatedAt: timestamp });
   }
   if (request.method === "DELETE") {
-    const linkedRefunds = await env.DB.prepare(
-      "SELECT COUNT(*) AS count FROM ledger_entries WHERE project_id = ? AND refund_of_entry_id = ?",
-    ).bind(projectId, entryId).first<{ count: number }>();
-    if ((linkedRefunds?.count ?? 0) > 0) {
-      return json({ error: "此支出已有退款紀錄，請先刪除相關退款。" }, { status: 409 });
-    }
-    const attachments = await env.DB.prepare(
-      "SELECT object_key FROM attachments WHERE entry_id = ?",
-    ).bind(entryId).all<{ object_key: string }>();
+    const attachments = await env.DB.prepare(`
+      SELECT a.object_key
+      FROM attachments a
+      JOIN ledger_entries e ON e.id = a.entry_id
+      WHERE e.project_id = ? AND (e.id = ? OR e.refund_of_entry_id = ?)
+    `).bind(projectId, entryId, entryId).all<{ object_key: string }>();
     if (attachments.results.length) await env.RECEIPTS.delete(attachments.results.map((item) => item.object_key));
     await env.DB.batch([
-      env.DB.prepare("DELETE FROM attachments WHERE entry_id = ?").bind(entryId),
-      env.DB.prepare("DELETE FROM ledger_entries WHERE id = ? AND project_id = ?").bind(entryId, projectId),
+      env.DB.prepare(`
+        DELETE FROM attachments
+        WHERE entry_id IN (
+          SELECT id FROM ledger_entries WHERE project_id = ? AND (id = ? OR refund_of_entry_id = ?)
+        )
+      `).bind(projectId, entryId, entryId),
+      env.DB.prepare(
+        "DELETE FROM ledger_entries WHERE project_id = ? AND (id = ? OR refund_of_entry_id = ?)",
+      ).bind(projectId, entryId, entryId),
     ]);
     await touchProject(projectId, env);
     return new Response(null, { status: 204 });
@@ -878,21 +818,19 @@ async function exportCsv(env: Env, projectId: string): Promise<Response> {
   if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   const result = await env.DB.prepare(`
     SELECT e.occurred_on, e.kind, e.description, COALESCE(c.name, '') AS category_name,
-      e.amount, e.status, e.counterparty, e.payment_method, e.note,
-      COALESCE(source.description, '') AS source_description
+      e.amount, e.status, e.counterparty, e.payment_method, e.note
     FROM ledger_entries e
     LEFT JOIN budget_categories c ON c.id = e.category_id
-    LEFT JOIN ledger_entries source ON source.id = e.refund_of_entry_id
     WHERE e.project_id = ?
     ORDER BY e.occurred_on DESC
   `).bind(projectId).all<Record<string, unknown>>();
-  const headers = ["日期", "類型", "品項", "分類", "金額", "狀態", "對象", "付款方式", "原始支出", "備註"];
+  const headers = ["日期", "類型", "品項", "分類", "金額", "狀態", "對象", "付款方式", "備註"];
   const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = "\uFEFF" + [
     headers,
     ...result.results.map((row) => [
       row.occurred_on, row.kind, row.description, row.category_name, row.amount,
-      row.status, row.counterparty, row.payment_method, row.source_description, row.note,
+      row.status, row.counterparty, row.payment_method, row.note,
     ]),
   ].map((row) => row.map(quote).join(",")).join("\n");
   return new Response(csv, {

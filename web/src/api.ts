@@ -30,7 +30,6 @@ export interface ProjectInput {
 export interface EntryInput {
   kind: EntryKind;
   status: EntryStatus;
-  refundOfEntryId: string | null;
   description: string;
   personId: string | null;
   amount: number;
@@ -309,28 +308,12 @@ export async function saveEntry(
 ): Promise<LedgerEntry> {
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;
-    let resolved = input;
-    if (input.kind === "refund") {
-      const source = dashboard.entries.find((entry) => entry.id === input.refundOfEntryId);
-      if (!source?.personId) throw new Error("原始支出必須先指定付款人");
-      resolved = { ...input, personId: source.personId, counterparty: source.counterparty };
-    } else {
-      const person = dashboard.people.find((item) => item.id === input.personId && item.active);
-      if (!person) throw new Error("請選擇啟用中的人員");
-      resolved = { ...input, personId: person.id, counterparty: person.name };
-    }
+    const person = dashboard.people.find((item) => item.id === input.personId && item.active);
+    if (!person) throw new Error("請選擇啟用中的人員");
+    const resolved = { ...input, personId: person.id, counterparty: person.name };
     if (entryId) {
       const item = dashboard.entries.find((entry) => entry.id === entryId)!;
       Object.assign(item, resolved, { updatedAt: now() });
-      if (resolved.kind === "expense") {
-        dashboard.entries
-          .filter((entry) => entry.refundOfEntryId === entryId)
-          .forEach((refund) => Object.assign(refund, {
-            personId: resolved.personId,
-            counterparty: resolved.counterparty,
-            updatedAt: now(),
-          }));
-      }
       touchDemo(projectId);
       return clone(item);
     }
@@ -378,7 +361,7 @@ export async function downloadProjectCsv(projectId: string, projectName: string)
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;
     const rows = [
-      ["日期", "類型", "品項", "分類", "金額", "狀態", "對象", "付款方式", "原始支出", "備註"],
+      ["日期", "類型", "品項", "分類", "金額", "狀態", "對象", "付款方式", "備註"],
       ...dashboard.entries.map((entry) => [
         entry.occurredOn,
         entry.kind,
@@ -388,7 +371,6 @@ export async function downloadProjectCsv(projectId: string, projectName: string)
         entry.status,
         entry.counterparty,
         entry.paymentMethod,
-        entry.refundOfEntryId ? dashboard.entries.find((item) => item.id === entry.refundOfEntryId)?.description ?? "" : "",
         entry.note,
       ]),
     ];
