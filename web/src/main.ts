@@ -536,6 +536,14 @@ function renderCashflow() {
     activity.source === "entry"
       ? entryStatusText(payload!.entries.find((entry) => entry.id === activity.id)!)
       : transferStatusText(activity.status as FundTransfer["status"]);
+  const runningBalanceMarkup = (activity: CashbookActivity, includeLabel = false) => {
+    const label = includeLabel ? '<span class="balance-label">餘額</span>' : "";
+    if (activity.runningBalance === null) {
+      return `<span class="passbook-running-balance is-pending">${label}<b>未入帳</b></span>`;
+    }
+    const tone = activity.runningBalance < 0 ? "is-negative" : "is-positive";
+    return `<span class="passbook-running-balance ${tone}">${label}<b>${formatMoney(activity.runningBalance)}</b></span>`;
+  };
   const activityActions = (activity: CashbookActivity, compact = false) =>
     activity.source === "entry"
       ? `<button data-action="edit-entry" data-id="${activity.id}" aria-label="編輯 ${esc(activityTitle(activity))}">${compact ? "✎" : "編輯"}</button><button class="danger-text" data-action="delete-entry" data-id="${activity.id}" aria-label="刪除 ${esc(activityTitle(activity))}">${compact ? "×" : "刪除"}</button>`
@@ -546,7 +554,7 @@ function renderCashflow() {
     <td>${esc(relatedPeople(activity))}</td>
     <td class="amount income">${activity.delta > 0 ? formatMoney(activity.amount) : "—"}</td>
     <td class="amount negative">${activity.delta < 0 ? formatMoney(activity.amount) : "—"}</td>
-    <td class="amount">${activity.runningBalance === null ? '<span class="pending-balance">未入帳</span>' : formatMoney(activity.runningBalance)}</td>
+    <td class="amount">${runningBalanceMarkup(activity)}</td>
     <td><span class="status ${activity.status}">${activityStatusText(activity)}</span></td>
     <td class="row-actions">${activityActions(activity)}</td>
   </tr>`;
@@ -556,7 +564,7 @@ function renderCashflow() {
     return `<article class="mobile-record-card passbook-card">
       <div class="mobile-record-head"><div><div class="passbook-card-meta"><small>${dateLabel(activity.occurredOn)}</small><span class="ledger-type ${activity.kind}">${activityTypeLabel(activity)}</span></div><strong>${esc(activityTitle(activity))}</strong></div><b class="amount ${amountClass}">${amountPrefix}${formatMoney(activity.amount)}</b></div>
       <p class="passbook-detail">${esc(relatedPeople(activity))} · ${esc(activityDetails(activity))}</p>
-      <div class="compact-entry-footer"><div class="compact-entry-meta"><span class="status ${activity.status}">${activityStatusText(activity)}</span><span>${activity.runningBalance === null ? "未入帳" : `餘額 ${formatMoney(activity.runningBalance)}`}</span></div><div class="compact-entry-actions">${activityActions(activity, true)}</div></div>
+      <div class="compact-entry-footer"><div class="compact-entry-meta"><span class="status ${activity.status}">${activityStatusText(activity)}</span>${runningBalanceMarkup(activity, true)}</div><div class="compact-entry-actions">${activityActions(activity, true)}</div></div>
     </article>`;
   };
   const balanceAmount = selectedPerson && ledger.balance < 0 ? Math.abs(ledger.balance) : ledger.balance;
