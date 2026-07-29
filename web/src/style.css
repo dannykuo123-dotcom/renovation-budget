@@ -58,6 +58,8 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
 .cashbook-intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .cashbook-intro h3 { margin: 5px 0 7px; font-size: 22px; }
 .cashbook-intro p:last-child { max-width: 680px; margin: 0; color: #69756f; line-height: 1.6; }
+.cashbook-action { gap: 4px; }
+.action-short-label { display: none; }
 .cashbook-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
 .cashbook-overview article { border: 1px solid #e4e5df; border-radius: 16px; background: #fffefa; }
 .cashbook-overview article { display: grid; gap: 5px; padding: 19px; }
@@ -188,6 +190,13 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
   .entry-action-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .entry-action-buttons .primary, .entry-action-buttons .secondary { width: 100%; min-height: 42px; padding: 9px 10px; }
   .entry-action-buttons > :only-child { grid-column: 1 / -1; }
+  .cashbook-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .cashbook-actions .primary, .cashbook-actions .secondary { min-width: 0; padding: 8px 4px; border-radius: 11px; white-space: nowrap; font-size: 12px; }
+  .cashbook-actions .action-long-label { display: none; }
+  .cashbook-actions .action-short-label { display: inline; }
+  .cashbook-actions .income-action { color: #08705c; background: #dff3eb; }
+  .cashbook-actions .transfer-action { color: #385d87; background: #e5eef8; }
+  .cashbook-actions .expense-action { color: white; background: #1d786b; }
   .desktop-entry-filters { display: none; }
   .mobile-entry-filters { display: grid; gap: 8px; margin-bottom: 12px; }
   .mobile-filter-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
