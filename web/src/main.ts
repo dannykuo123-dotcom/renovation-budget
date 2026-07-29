@@ -21,7 +21,7 @@ import {
   updateProject,
   uploadAttachments,
 } from "./api";
-import { calculatePersonBalances, calculatePersonCashbookSummaries, calculateTotals, categorySpent, formatMoney } from "./finance";
+import { buildCashbookLedger, calculateTotals, categorySpent, formatMoney, type CashbookActivity } from "./finance";
 import { parseRoute, projectRoute, projectsRoute, type ProjectView } from "./router";
 import type {
   Category,
@@ -49,8 +49,11 @@ let budgetSortKey: BudgetSortKey = "sortOrder";
 let budgetSortDirection: SortDirection = "asc";
 let entrySortKey: EntrySortKey = "occurredOn";
 let entrySortDirection: SortDirection = "desc";
-type CashbookTab = "overview" | "all" | "income" | "expenses" | "transfers";
-let cashbookTab: CashbookTab = "overview";
+type CashbookTypeFilter = "all" | "income" | "expense" | "transfer";
+type CashbookStatusFilter = "posted" | "pending";
+let cashbookPersonId = "";
+let cashbookTypeFilter: CashbookTypeFilter = "all";
+let cashbookStatusFilter: CashbookStatusFilter = "posted";
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 const esc = (value: string) =>
@@ -472,80 +475,111 @@ function transferStatusText(status: FundTransfer["status"]): string {
   return status === "posted" ? "已完成" : status === "pending" ? "待處理" : "已作廢";
 }
 
-function balanceLabel(balance: number): string {
-  return `${balance < 0 ? "代墊" : "手上"} ${formatMoney(Math.abs(balance))}`;
-}
-
 function renderCashflow() {
-  const totals = calculateTotals(payload!.categories, payload!.entries);
-  const summaries = calculatePersonCashbookSummaries(payload!.people, payload!.entries, payload!.transfers);
-  const entries = payload!.entries
-    .filter((entry) => entry.status !== "void")
-    .sort((left, right) => right.occurredOn.localeCompare(left.occurredOn) || right.createdAt.localeCompare(left.createdAt));
-  const displayedEntries = entries.filter((entry) =>
-    cashbookTab === "all" || (cashbookTab === "income" && entry.kind === "income"));
-  const transfers = [...payload!.transfers].sort((left, right) =>
-    right.occurredOn.localeCompare(left.occurredOn) || right.createdAt.localeCompare(left.createdAt));
-  const unassignedCount = entries.filter((entry) => entry.status === "posted" && !entry.personId).length;
-  const tabLabel: Record<CashbookTab, string> = { overview: "總覽", all: "全部帳務", income: "收入", expenses: "支出", transfers: "資金移轉" };
-  const entryType = (entry: LedgerEntry) => entry.kind === "income" ? "收入" : "支出";
-  const entryRow = (entry: LedgerEntry) => `<tr>
-    <td>${dateLabel(entry.occurredOn)}</td>
-    <td><span class="ledger-type ${entry.kind}">${entryType(entry)}</span></td>
-    <td><strong>${esc(entry.description)}</strong></td>
-    <td>${esc(personName(entry.personId))}</td>
-    <td><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span></td>
-    <td class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</td>
-    <td class="row-actions"><button data-action="edit-entry" data-id="${entry.id}">編輯</button><button data-action="delete-entry" data-id="${entry.id}">刪除</button></td>
+  const peopleWithHistory = payload!.people
+    .filter((person) => person.active ||
+      payload!.entries.some((entry) => entry.personId === person.id) ||
+      payload!.transfers.some((transfer) => transfer.fromPersonId === person.id || transfer.toPersonId === person.id))
+    .sort((left, right) => Number(right.active) - Number(left.active) || left.name.localeCompare(right.name, "zh-Hant"));
+  if (cashbookPersonId && !peopleWithHistory.some((person) => person.id === cashbookPersonId)) cashbookPersonId = "";
+  const selectedPerson = peopleWithHistory.find((person) => person.id === cashbookPersonId);
+  const ledger = buildCashbookLedger(payload!.entries, payload!.transfers, selectedPerson?.id ?? null);
+  const typeMatches = (activity: CashbookActivity) =>
+    cashbookTypeFilter === "all" ||
+    activity.kind === cashbookTypeFilter ||
+    (cashbookTypeFilter === "transfer" && activity.kind.startsWith("transfer"));
+  const activities = ledger.activities.filter((activity) =>
+    activity.status === cashbookStatusFilter && typeMatches(activity));
+  const unassignedCount = payload!.entries
+    .filter((entry) => entry.status === "posted" && !entry.personId).length;
+  const personOptions = `<option value="">全部人員</option>${peopleWithHistory.map((person) =>
+    `<option value="${person.id}" ${person.id === cashbookPersonId ? "selected" : ""}>${esc(person.name)}${person.role ? `（${esc(person.role)}）` : ""}${person.active ? "" : "（已停用）"}</option>`,
+  ).join("")}`;
+  const activityTypeLabel = (activity: CashbookActivity) => ({
+    income: "收入",
+    expense: "支出",
+    transfer: "移轉",
+    "transfer-in": "轉入",
+    "transfer-out": "轉出",
+  })[activity.kind];
+  const activityTitle = (activity: CashbookActivity) => {
+    if (activity.source === "entry") return activity.description;
+    if (activity.kind === "transfer-in") return `收到 ${personName(activity.fromPersonId)} 移轉`;
+    if (activity.kind === "transfer-out") return `轉給 ${personName(activity.toPersonId)}`;
+    return `${personName(activity.fromPersonId)} → ${personName(activity.toPersonId)}`;
+  };
+  const relatedPeople = (activity: CashbookActivity) => {
+    if (activity.source === "entry") return personName(activity.personId);
+    if (activity.kind === "transfer-in") return personName(activity.fromPersonId);
+    if (activity.kind === "transfer-out") return personName(activity.toPersonId);
+    return `${personName(activity.fromPersonId)} → ${personName(activity.toPersonId)}`;
+  };
+  const activityDetails = (activity: CashbookActivity) => {
+    const details = activity.source === "entry"
+      ? [
+          activity.kind === "expense" ? categoryName(payload!.entries.find((entry) => entry.id === activity.id)?.categoryId ?? null) : "",
+          activity.paymentMethod,
+          activity.note,
+        ]
+      : [activity.paymentMethod, activity.note || "人員間資金移轉"];
+    return details.filter(Boolean).join(" · ") || "未填寫詳細資料";
+  };
+  const activityStatusText = (activity: CashbookActivity) =>
+    activity.source === "entry"
+      ? entryStatusText(payload!.entries.find((entry) => entry.id === activity.id)!)
+      : transferStatusText(activity.status as FundTransfer["status"]);
+  const activityActions = (activity: CashbookActivity, compact = false) =>
+    activity.source === "entry"
+      ? `<button data-action="edit-entry" data-id="${activity.id}" aria-label="編輯 ${esc(activityTitle(activity))}">${compact ? "✎" : "編輯"}</button><button class="danger-text" data-action="delete-entry" data-id="${activity.id}" aria-label="刪除 ${esc(activityTitle(activity))}">${compact ? "×" : "刪除"}</button>`
+      : `<button data-action="edit-transfer" data-id="${activity.id}" aria-label="編輯移轉">${compact ? "✎" : "編輯"}</button><button class="danger-text" data-action="delete-transfer" data-id="${activity.id}" aria-label="刪除移轉">${compact ? "×" : "刪除"}</button>`;
+  const activityRow = (activity: CashbookActivity) => `<tr>
+    <td>${dateLabel(activity.occurredOn)}</td>
+    <td><span class="ledger-type ${activity.kind}">${activityTypeLabel(activity)}</span><strong class="passbook-title">${esc(activityTitle(activity))}</strong><small class="passbook-detail">${esc(activityDetails(activity))}</small></td>
+    <td>${esc(relatedPeople(activity))}</td>
+    <td class="amount income">${activity.delta > 0 ? formatMoney(activity.amount) : "—"}</td>
+    <td class="amount negative">${activity.delta < 0 ? formatMoney(activity.amount) : "—"}</td>
+    <td class="amount">${activity.runningBalance === null ? '<span class="pending-balance">未入帳</span>' : formatMoney(activity.runningBalance)}</td>
+    <td><span class="status ${activity.status}">${activityStatusText(activity)}</span></td>
+    <td class="row-actions">${activityActions(activity)}</td>
   </tr>`;
-  const entryCard = (entry: LedgerEntry) => `<article class="mobile-record-card compact-entry-card">
-    <div class="mobile-record-head"><div><small>${dateLabel(entry.occurredOn)} · ${entryType(entry)}</small><strong>${esc(entry.description)}</strong></div><b class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</b></div>
-    <div class="compact-entry-footer"><div class="compact-entry-meta"><span>${esc(personName(entry.personId))}</span><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span></div><div class="compact-entry-actions"><button data-action="edit-entry" data-id="${entry.id}" aria-label="編輯 ${esc(entry.description)}">✎</button><button class="danger-text" data-action="delete-entry" data-id="${entry.id}" aria-label="刪除 ${esc(entry.description)}">×</button></div></div>
-  </article>`;
-  const personSummaryCards = summaries.map((summary) => `<article class="person-cash-card">
-    <div class="person-cash-head"><div><strong>${esc(summary.person.name)}</strong><small>${esc(summary.person.role || "工程人員")}</small></div><button data-action="person-balance" data-id="${summary.person.id}">明細</button></div>
-    <div class="person-cash-values"><span><small>已收款</small><b class="income">${formatMoney(summary.income)}</b></span><span><small>已付款</small><b>${formatMoney(summary.paid)}</b></span></div>
-    <div class="person-cash-balance ${summary.cashOnHand < 0 ? "advanced" : "held"}"><span>${summary.cashOnHand < 0 ? "個人代墊" : "手上工程款"}</span><strong>${formatMoney(Math.abs(summary.cashOnHand))}</strong></div>
-  </article>`).join("");
-  const personExpenseCards = summaries.map((summary) => {
-    const personEntries = entries.filter((entry) => entry.personId === summary.person.id && entry.kind !== "income");
-    return `<article class="person-expense-card"><div class="person-expense-head"><div><p class="eyebrow">PERSONAL EXPENSE</p><h3>${esc(summary.person.name)}的支出</h3></div><strong>已付款 ${formatMoney(summary.paid)}</strong></div>
-      <div class="person-expense-list">${personEntries.map((entry) => `<div class="person-expense-line"><div><small>${dateLabel(entry.occurredOn)} · ${entryType(entry)}</small><strong>${esc(entry.description)}</strong></div><b class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</b><button data-action="edit-entry" data-id="${entry.id}" aria-label="編輯 ${esc(entry.description)}">✎</button></div>`).join("") || '<p class="empty">尚無支出紀錄</p>'}</div>
+  const activityCard = (activity: CashbookActivity) => {
+    const amountClass = activity.delta > 0 ? "income" : activity.delta < 0 ? "negative" : "";
+    const amountPrefix = activity.delta > 0 ? "+" : activity.delta < 0 ? "−" : "↔ ";
+    return `<article class="mobile-record-card passbook-card">
+      <div class="mobile-record-head"><div><small>${dateLabel(activity.occurredOn)} · ${activityTypeLabel(activity)}</small><strong>${esc(activityTitle(activity))}</strong></div><b class="amount ${amountClass}">${amountPrefix}${formatMoney(activity.amount)}</b></div>
+      <p class="passbook-detail">${esc(relatedPeople(activity))} · ${esc(activityDetails(activity))}</p>
+      <div class="compact-entry-footer"><div class="compact-entry-meta"><span class="status ${activity.status}">${activityStatusText(activity)}</span><span>${activity.runningBalance === null ? "未入帳" : `餘額 ${formatMoney(activity.runningBalance)}`}</span></div><div class="compact-entry-actions">${activityActions(activity, true)}</div></div>
     </article>`;
-  }).join("");
-  const transferRows = transfers.map((transfer) => `<tr><td>${dateLabel(transfer.occurredOn)}</td><td><strong>${esc(personName(transfer.fromPersonId))}</strong></td><td><strong>${esc(personName(transfer.toPersonId))}</strong></td><td><span class="status ${transfer.status}">${transferStatusText(transfer.status)}</span></td><td class="amount">${formatMoney(transfer.amount)}</td><td>${esc(transfer.note || "—")}</td><td class="row-actions"><button data-action="edit-transfer" data-id="${transfer.id}">編輯</button><button data-action="delete-transfer" data-id="${transfer.id}">刪除</button></td></tr>`).join("");
-  const transferCards = transfers.map((transfer) => `<article class="mobile-record-card compact-entry-card"><div class="mobile-record-head"><div><small>${dateLabel(transfer.occurredOn)} · 資金移轉</small><strong>${esc(personName(transfer.fromPersonId))} → ${esc(personName(transfer.toPersonId))}</strong></div><b class="amount">${formatMoney(transfer.amount)}</b></div><div class="compact-entry-footer"><div class="compact-entry-meta"><span class="status ${transfer.status}">${transferStatusText(transfer.status)}</span></div><div class="compact-entry-actions"><button data-action="edit-transfer" data-id="${transfer.id}" aria-label="編輯移轉">✎</button><button class="danger-text" data-action="delete-transfer" data-id="${transfer.id}" aria-label="刪除移轉">×</button></div></div></article>`).join("");
-  const actions = cashbookTab === "income"
-    ? '<button class="primary" data-action="new-entry" data-kind="income">＋ 新增收入</button>'
-    : cashbookTab === "expenses"
-      ? '<button class="primary" data-action="new-entry" data-kind="expense">＋ 新增支出</button>'
-      : cashbookTab === "transfers"
-        ? '<button class="secondary" data-action="export-cashflow">下載移轉 CSV</button><button class="primary" data-action="new-transfer">↔ 新增資金移轉</button>'
-        : '<button class="secondary" data-action="new-entry" data-kind="income">＋ 新增收入</button><button class="primary" data-action="new-entry" data-kind="expense">＋ 新增支出</button>';
+  };
+  const balanceAmount = selectedPerson && ledger.balance < 0 ? Math.abs(ledger.balance) : ledger.balance;
+  const balanceTitle = selectedPerson
+    ? ledger.balance < 0 ? "個人代墊" : "手上工程款"
+    : "工程款餘額";
+  const selectedPersonData = selectedPerson?.active ? ` data-person-id="${selectedPerson.id}"` : "";
   layout(`
-    <section class="cashbook-intro"><div><p class="eyebrow">PROJECT CASHBOOK</p><h3>${cashbookTab === "overview" ? "工程款總覽" : tabLabel[cashbookTab]}</h3><p>${cashbookTab === "overview" ? "先看工程款剩多少、每個人手上有多少，再到各分頁處理明細。" : cashbookTab === "income" ? "只顯示實際收進工程款的紀錄，並標示目前收款人。" : cashbookTab === "expenses" ? "支出依付款人分開列示；若有退款，直接刪除原支出紀錄即可。" : cashbookTab === "transfers" ? "只管理人員之間的工程款移轉，不會改變總收入、總支出或工程款剩餘。" : "收入與支出會以正負號清楚區分。"}</p></div><div class="entry-action-buttons">${actions}</div></section>
-    <section class="cashbook-tabs" aria-label="帳本分類">${(["overview", "all", "income", "expenses", "transfers"] as CashbookTab[]).map((tab) => `<button class="${cashbookTab === tab ? "active" : ""}" data-cashbook-tab="${tab}">${tabLabel[tab]}</button>`).join("")}</section>
-    ${cashbookTab === "overview" ? `
-      <section class="cashbook-overview"><article><small>總收入</small><strong class="income">${formatMoney(totals.received)}</strong><span>所有已入帳工程款</span></article><article><small>已付款</small><strong>${formatMoney(entries.filter((entry) => entry.kind === "expense" && entry.status === "posted").reduce((sum, entry) => sum + entry.amount, 0))}</strong><span>所有已付款支出</span></article><article class="cashbook-balance"><small>工程款剩餘</small><strong>${formatMoney(totals.cashBalance)}</strong><span>總收入 − 已付款支出</span></article></section>
-      ${unassignedCount ? `<div class="cashflow-warning">有 ${unassignedCount} 筆已完成帳務尚未指定人員；它們會計入工程總額，但不會出現在個人帳本。</div>` : ""}
-      <section class="cashbook-section-heading"><div><p class="eyebrow">PERSONAL SUMMARY</p><h3>個人收支與手上工程款</h3></div><small>已付款是人員實際支出；已收款只計入收取／保管的工程款。</small></section>
-      <section class="person-cash-grid">${personSummaryCards || '<div class="panel empty">請先到工程設定新增人員</div>'}</section>
-    ` : cashbookTab === "expenses" ? `
-      <section class="cashbook-section-heading"><div><p class="eyebrow">PERSONAL EXPENSES</p><h3>你和我的支出</h3></div><small>每個人的付款會分開列示。</small></section>
-      <section class="person-expense-grid">${personExpenseCards || '<div class="panel empty">請先到工程設定新增人員</div>'}</section>
-    ` : cashbookTab === "transfers" ? `
-      <section class="cashbook-section-heading"><div><p class="eyebrow">TRANSFERS</p><h3>人員間資金移轉</h3></div><small>移轉只改變誰保管工程款，不影響工程總金額。</small></section>
-      <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>日期</th><th>轉出人</th><th>轉入人</th><th>狀態</th><th>金額</th><th>備註</th><th></th></tr></thead><tbody>${transferRows || '<tr><td colspan="7" class="empty">目前沒有資金移轉紀錄</td></tr>'}</tbody></table></div></section>
-      <section class="mobile-record-list">${transferCards || '<div class="panel empty">目前沒有資金移轉紀錄</div>'}</section>
-    ` : `
-      <section class="cashbook-section-heading"><div><p class="eyebrow">${cashbookTab === "income" ? "INCOME" : "ALL RECORDS"}</p><h3>${cashbookTab === "income" ? "收入帳本" : "全部帳務"}</h3></div><small>${cashbookTab === "income" ? "每一筆收入都會標示目前收款人。" : "收入與支出會以正負號清楚區分。"}</small></section>
-      <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>日期</th><th>類型</th><th>項目</th><th>人員</th><th>狀態</th><th>金額</th><th></th></tr></thead><tbody>${displayedEntries.map(entryRow).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的帳務。</td></tr>'}</tbody></table></div></section>
-      <section class="mobile-record-list">${displayedEntries.map(entryCard).join("") || '<div class="panel empty">目前沒有符合條件的帳務。</div>'}</section>
-    `}`, "cashflow");
-  document.querySelectorAll<HTMLButtonElement>("[data-cashbook-tab]").forEach((button) => button.addEventListener("click", () => {
-    cashbookTab = button.dataset.cashbookTab as CashbookTab;
+    <section class="cashbook-intro"><div><p class="eyebrow">PROJECT CASHBOOK</p><h3>${selectedPerson ? `${esc(selectedPerson.name)}的工程存摺` : "全部人員工程存摺"}</h3><p>${selectedPerson ? "收入、付款、轉入與轉出會依日期排列，逐筆顯示手上工程款變化。" : "查看整個工程的收入與支出；人員間移轉會列出，但不影響工程總餘額。"}</p></div><div class="entry-action-buttons"><button class="secondary" data-action="new-entry" data-kind="income"${selectedPersonData}>＋ 新增收入</button><button class="secondary" data-action="new-transfer">↔ 新增移轉</button><button class="primary" data-action="new-entry" data-kind="expense"${selectedPersonData}>＋ 新增支出</button></div></section>
+    <section class="cashbook-overview passbook-summary"><article><small>${selectedPerson ? "累計存入" : "工程總收入"}</small><strong class="income">${formatMoney(ledger.deposited)}</strong><span>${selectedPerson ? "收入與已完成轉入" : "所有已入帳工程款"}</span></article><article><small>${selectedPerson ? "累計支出" : "工程總支出"}</small><strong>${formatMoney(ledger.withdrawn)}</strong><span>${selectedPerson ? "付款與已完成轉出" : "所有已付款支出"}</span></article><article class="cashbook-balance ${selectedPerson && ledger.balance < 0 ? "advanced" : ""}"><small>${balanceTitle}</small><strong>${formatMoney(balanceAmount)}</strong><span>${selectedPerson ? "已完成交易的目前結果" : "總收入 − 總支出"}</span></article></section>
+    ${unassignedCount ? `<div class="cashflow-warning">有 ${unassignedCount} 筆已完成帳務尚未指定人員；全部人員模式仍會顯示，個人存摺不會列入。</div>` : ""}
+    <section class="panel passbook-filters">
+      <label>查看帳本<select id="cashbook-person">${personOptions}</select></label>
+      <label>交易類型<select id="cashbook-type"><option value="all" ${cashbookTypeFilter === "all" ? "selected" : ""}>全部類型</option><option value="income" ${cashbookTypeFilter === "income" ? "selected" : ""}>收入</option><option value="expense" ${cashbookTypeFilter === "expense" ? "selected" : ""}>支出</option><option value="transfer" ${cashbookTypeFilter === "transfer" ? "selected" : ""}>資金移轉</option></select></label>
+      <label>入帳狀態<select id="cashbook-status"><option value="posted" ${cashbookStatusFilter === "posted" ? "selected" : ""}>已完成</option><option value="pending" ${cashbookStatusFilter === "pending" ? "selected" : ""}>待處理</option></select></label>
+    </section>
+    <section class="cashbook-section-heading"><div><p class="eyebrow">PASSBOOK</p><h3>收支明細</h3></div><small>${activities.length} 筆符合條件的交易 · 依日期由新到舊</small></section>
+    <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="passbook-table"><thead><tr><th>日期</th><th>摘要</th><th>相關人員</th><th>存入</th><th>支出</th><th>當時餘額</th><th>狀態</th><th></th></tr></thead><tbody>${activities.map(activityRow).join("") || '<tr><td colspan="8" class="empty">目前沒有符合條件的交易。</td></tr>'}</tbody></table></div></section>
+    <section class="mobile-record-list">${activities.map(activityCard).join("") || '<div class="panel empty">目前沒有符合條件的交易。</div>'}</section>`, "cashflow");
+  document.querySelector<HTMLSelectElement>("#cashbook-person")?.addEventListener("change", (event) => {
+    cashbookPersonId = (event.target as HTMLSelectElement).value;
     renderCashflow();
-  }));
+  });
+  document.querySelector<HTMLSelectElement>("#cashbook-type")?.addEventListener("change", (event) => {
+    cashbookTypeFilter = (event.target as HTMLSelectElement).value as CashbookTypeFilter;
+    renderCashflow();
+  });
+  document.querySelector<HTMLSelectElement>("#cashbook-status")?.addEventListener("change", (event) => {
+    cashbookStatusFilter = (event.target as HTMLSelectElement).value as CashbookStatusFilter;
+    renderCashflow();
+  });
 }
 
 function renderSettings() {
@@ -687,8 +721,9 @@ function openCategoryModal(existing?: Category) {
   });
 }
 
-function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expense") {
+function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expense", defaultPersonId: string | null = null) {
   const kind = existing?.kind ?? defaultKind;
+  const selectedPersonId = existing?.personId ?? defaultPersonId;
   const categoryOptions = `<option value="">不指定分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${(existing?.categoryId ?? "") === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}`;
   const personLabel = kind === "income" ? "收款人／目前持有人" : "付款人／代墊人";
   openModal(`
@@ -699,7 +734,7 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       <label>金額<input name="amount" type="number" min="1" step="1" required value="${existing?.amount ?? ""}" /></label>
       <label>日期<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
       <label>預算分類<select name="categoryId">${categoryOptions}</select></label>
-      <label>${personLabel}<select name="personId" required>${activePersonOptions(existing?.personId ?? null)}</select></label>
+      <label>${personLabel}<select name="personId" required>${activePersonOptions(selectedPersonId)}</select></label>
       <label>付款方式<select name="paymentMethod"><option value="">未指定</option>${["銀行轉帳", "現金", "信用卡", "電子支付"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
       <label>狀態<select name="status"></select></label>
       <p class="form-hint full"></p>
@@ -758,43 +793,6 @@ function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expens
       toast(reason instanceof Error ? reason.message : "儲存失敗", "error");
     }
   });
-}
-
-function openPersonBalanceModal(personId: string) {
-  const person = personById(personId);
-  if (!person) return toast("找不到此人員", "error");
-  const summary = calculatePersonBalances(payload!.people, payload!.entries, payload!.transfers)
-    .find((item) => item.person.id === personId);
-  const activities: Array<{ id: string; occurredOn: string; createdAt: string; label: string; note: string; delta: number }> = [];
-  for (const entry of payload!.entries) {
-    if (entry.personId !== personId || entry.status !== "posted") continue;
-    activities.push({
-      id: entry.id,
-      occurredOn: entry.occurredOn,
-      createdAt: entry.createdAt,
-      label: kindLabel[entry.kind],
-      note: entry.description,
-      delta: entry.kind === "expense" ? -entry.amount : entry.amount,
-    });
-  }
-  for (const transfer of payload!.transfers) {
-    if (transfer.status !== "posted") continue;
-    if (transfer.fromPersonId === personId) {
-      activities.push({ id: transfer.id, occurredOn: transfer.occurredOn, createdAt: transfer.createdAt, label: "轉出", note: `轉給 ${personName(transfer.toPersonId)}`, delta: -transfer.amount });
-    }
-    if (transfer.toPersonId === personId) {
-      activities.push({ id: transfer.id, occurredOn: transfer.occurredOn, createdAt: transfer.createdAt, label: "轉入", note: `收到 ${personName(transfer.fromPersonId)} 移轉`, delta: transfer.amount });
-    }
-  }
-  let runningBalance = 0;
-  const history = activities
-    .sort((left, right) => left.occurredOn.localeCompare(right.occurredOn) || left.createdAt.localeCompare(right.createdAt))
-    .map((activity) => ({ ...activity, runningBalance: runningBalance += activity.delta }))
-    .reverse();
-  openModal(`
-    <div class="modal-head"><div><p class="eyebrow">BALANCE</p><h3>${esc(person.name)}的餘額明細</h3></div><button class="icon-button" data-action="close-modal" aria-label="關閉">×</button></div>
-    <div class="person-balance-summary ${summary && summary.balance < 0 ? "advanced" : "held"}"><small>目前餘額</small><strong>${balanceLabel(summary?.balance ?? 0)}</strong></div>
-    <div class="table-wrap balance-history"><table><thead><tr><th>日期</th><th>類型／內容</th><th>增減</th><th>當時餘額</th></tr></thead><tbody>${history.map((activity) => `<tr><td>${dateLabel(activity.occurredOn)}</td><td><strong>${activity.label}</strong><small class="attachment-count">${esc(activity.note)}</small></td><td class="amount ${activity.delta < 0 ? "negative" : "income"}">${activity.delta < 0 ? "−" : "+"}${formatMoney(Math.abs(activity.delta))}</td><td>${formatMoney(activity.runningBalance)}</td></tr>`).join("") || '<tr><td colspan="4" class="empty">目前沒有已完成的餘額異動</td></tr>'}</tbody></table></div>`);
 }
 
 function openPersonModal(existing?: Person) {
@@ -897,7 +895,7 @@ function bindCommon() {
         toast(reason instanceof Error ? reason.message : "刪除失敗", "error");
       }
     }
-    if (action === "new-entry") openEntryModal(undefined, button.dataset.kind as EntryKind);
+    if (action === "new-entry") openEntryModal(undefined, button.dataset.kind as EntryKind, button.dataset.personId || null);
     if (action === "edit-entry") openEntryModal(payload!.entries.find((entry) => entry.id === button.dataset.id));
     if (action === "delete-entry" && confirm("確定刪除此筆紀錄與其附件嗎？")) {
       try {
@@ -918,7 +916,6 @@ function bindCommon() {
       try { await deletePerson(currentProjectId(), button.dataset.id!); await refresh(); toast("人員已刪除"); }
       catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
     }
-    if (action === "person-balance") openPersonBalanceModal(button.dataset.id!);
     if (action === "new-transfer") openTransferModal();
     if (action === "edit-transfer") openTransferModal(payload!.transfers.find((transfer) => transfer.id === button.dataset.id));
     if (action === "delete-transfer" && confirm("確定刪除此筆資金移轉嗎？")) {
@@ -932,6 +929,9 @@ window.addEventListener("hashchange", () => {
   query = "";
   filterCategory = "";
   filterStatus = "";
+  cashbookPersonId = "";
+  cashbookTypeFilter = "all";
+  cashbookStatusFilter = "posted";
   refresh();
 });
 

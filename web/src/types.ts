@@ -69,10 +69,6 @@ export interface FundTransfer {
   updatedAt: string;
 }
 
-export interface PersonBalanceSummary {
-  person: Person;
-  balance: number;
-}
 export interface Project {
   id: string;
   name: string;

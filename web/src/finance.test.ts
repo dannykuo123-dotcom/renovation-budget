@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { calculatePersonBalances, calculatePersonCashbookSummaries, calculateTotals } from "./finance";
-import type { Category, FundTransfer, LedgerEntry, Person } from "./types";
+import { buildCashbookLedger, calculateTotals } from "./finance";
+import type { Category, FundTransfer, LedgerEntry } from "./types";
 
 const categories: Category[] = [{ id: "c1", name: "材料", plannedAmount: 100000, color: "#6d5bd0", sortOrder: 1, items: [] }];
 const entry = (kind: LedgerEntry["kind"], amount: number, status: LedgerEntry["status"] = "posted"): LedgerEntry => ({
@@ -15,55 +15,88 @@ describe("calculateTotals", () => {
   });
 });
 
-describe("calculatePersonBalances", () => {
-  const person = (id: string, name: string): Person => ({
-    id, name, role: "", note: "", active: true, createdAt: "", updatedAt: "",
-  });
-  const people = [person("ming", "Ming"), person("danny", "Danny"), person("mike", "Mike")];
-
-  it("tracks how much project money each person currently holds", () => {
-    const entries: LedgerEntry[] = [
-      { ...entry("income", 400000), personId: "ming" },
-      { ...entry("expense", 47364), personId: "danny" },
-      { ...entry("expense", 8600), personId: "mike" },
-    ];
-    const transfers: FundTransfer[] = [
-      { id: "t1", fromPersonId: "ming", toPersonId: "danny", amount: 100000, occurredOn: "2026-07-02", status: "posted", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
-      { id: "t2", fromPersonId: "danny", toPersonId: "mike", amount: 100000, occurredOn: "2026-07-03", status: "posted", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
-    ];
-    const balances = calculatePersonBalances(people, entries, transfers);
-    expect(balances.find((item) => item.person.id === "ming")?.balance).toBe(300000);
-    expect(balances.find((item) => item.person.id === "danny")?.balance).toBe(-47364);
-    expect(balances.find((item) => item.person.id === "mike")?.balance).toBe(91400);
-    expect(balances.reduce((sum, item) => sum + item.balance, 0)).toBe(344036);
+describe("buildCashbookLedger", () => {
+  const transfer = (
+    id: string,
+    fromPersonId: string,
+    toPersonId: string,
+    amount: number,
+    status: FundTransfer["status"] = "posted",
+    occurredOn = "2026-07-02",
+  ): FundTransfer => ({
+    id,
+    fromPersonId,
+    toPersonId,
+    amount,
+    occurredOn,
+    status,
+    paymentMethod: "轉帳",
+    note: "",
+    createdAt: `${occurredOn}T08:00:00Z`,
+    updatedAt: "",
   });
 
-  it("ignores pending and void activity until it is completed", () => {
-    const entries: LedgerEntry[] = [
-      { ...entry("income", 1000), personId: "ming" },
-      { ...entry("expense", 80, "pending"), personId: "ming" },
-    ];
-    const transfers: FundTransfer[] = [
-      { id: "t1", fromPersonId: "ming", toPersonId: "danny", amount: 200, occurredOn: "2026-07-02", status: "pending", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
-      { id: "t2", fromPersonId: "ming", toPersonId: "mike", amount: 99, occurredOn: "2026-07-03", status: "void", paymentMethod: "", note: "", createdAt: "", updatedAt: "" },
-    ];
-    const balances = calculatePersonBalances(people, entries, transfers);
-    expect(balances.find((item) => item.person.id === "ming")?.balance).toBe(1000);
-    expect(balances.find((item) => item.person.id === "danny")?.balance).toBe(0);
-    expect(balances.find((item) => item.person.id === "mike")?.balance).toBe(0);
+  it("builds the project ledger without changing the balance for internal transfers", () => {
+    const ledger = buildCashbookLedger([
+      { ...entry("income", 400000), id: "income", personId: "ming", createdAt: "2026-07-01T08:00:00Z" },
+      { ...entry("expense", 14719), id: "expense", personId: "danny", occurredOn: "2026-07-03", createdAt: "2026-07-03T08:00:00Z" },
+    ], [transfer("transfer", "ming", "danny", 100000)], null);
+
+    expect(ledger).toMatchObject({ deposited: 400000, withdrawn: 14719, balance: 385281 });
+    expect(ledger.activities.map((activity) => ({
+      id: activity.id,
+      delta: activity.delta,
+      runningBalance: activity.runningBalance,
+    }))).toEqual([
+      { id: "expense", delta: -14719, runningBalance: 385281 },
+      { id: "transfer", delta: 0, runningBalance: 400000 },
+      { id: "income", delta: 400000, runningBalance: 400000 },
+    ]);
   });
-});
 
-describe("calculatePersonCashbookSummaries", () => {
-  it("shows a person's expense under paid, not received", () => {
-    const mike: Person = { id: "mike", name: "Mike", role: "水電工", note: "", active: true, createdAt: "", updatedAt: "" };
-    const summary = calculatePersonCashbookSummaries([mike], [
-      { ...entry("expense", 8600), personId: "mike" },
-      { ...entry("income", 12000), personId: "mike" },
-    ], []).at(0)!;
+  it("builds a personal passbook from entries and both transfer directions", () => {
+    const ledger = buildCashbookLedger([
+      { ...entry("expense", 14719), id: "expense", personId: "danny", occurredOn: "2026-07-04", createdAt: "2026-07-04T08:00:00Z" },
+    ], [
+      transfer("transfer-in", "ming", "danny", 100000, "posted", "2026-07-02"),
+      transfer("transfer-out", "danny", "mike", 100000, "posted", "2026-07-03"),
+    ], "danny");
 
-    expect(summary.income).toBe(12000);
-    expect(summary.paid).toBe(8600);
-    expect(summary.cashOnHand).toBe(3400);
+    expect(ledger).toMatchObject({ deposited: 100000, withdrawn: 114719, balance: -14719 });
+    expect(ledger.activities.map((activity) => activity.kind)).toEqual(["expense", "transfer-out", "transfer-in"]);
+    expect(ledger.activities.map((activity) => activity.runningBalance)).toEqual([-14719, 0, 100000]);
+  });
+
+  it("keeps pending activity visible without changing totals and removes void activity", () => {
+    const ledger = buildCashbookLedger([], [
+      transfer("posted", "ming", "mike", 1000),
+      transfer("pending", "ming", "mike", 200, "pending", "2026-07-03"),
+      transfer("void", "ming", "mike", 300, "void", "2026-07-04"),
+    ], "mike");
+
+    expect(ledger).toMatchObject({ deposited: 1000, withdrawn: 0, balance: 1000 });
+    expect(ledger.activities.map((activity) => ({
+      id: activity.id,
+      status: activity.status,
+      runningBalance: activity.runningBalance,
+    }))).toEqual([
+      { id: "pending", status: "pending", runningBalance: null },
+      { id: "posted", status: "posted", runningBalance: 1000 },
+    ]);
+  });
+
+  it("uses creation time to keep same-day balances stable", () => {
+    const ledger = buildCashbookLedger([
+      { ...entry("income", 100), id: "early", createdAt: "2026-07-01T08:00:00Z" },
+      { ...entry("expense", 10), id: "late", createdAt: "2026-07-01T09:00:00Z" },
+    ], [], null);
+
+    expect(ledger.activities.map((activity) => ({
+      id: activity.id,
+      runningBalance: activity.runningBalance,
+    }))).toEqual([
+      { id: "late", runningBalance: 90 },
+      { id: "early", runningBalance: 100 },
+    ]);
   });
 });

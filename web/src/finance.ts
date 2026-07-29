@@ -1,4 +1,4 @@
-import type { Category, FundTransfer, LedgerEntry, Person, PersonBalanceSummary } from "./types";
+import type { Category, FundTransfer, LedgerEntry } from "./types";
 
 export interface Totals {
   planned: number;
@@ -9,17 +9,114 @@ export interface Totals {
   budgetRemaining: number;
 }
 
-/**
- * A person's view of the project account.  `income` means project money that
- * person has received/keeps, while `paid` means they have actually paid an
- * expense.  Keeping these fields separate prevents a personal out-of-pocket
- * payment from being mistaken for money they collected.
- */
-export interface PersonCashbookSummary {
-  person: Person;
-  income: number;
-  paid: number;
-  cashOnHand: number;
+export type CashbookActivityKind = "income" | "expense" | "transfer" | "transfer-in" | "transfer-out";
+export type CashbookActivityStatus = LedgerEntry["status"] | FundTransfer["status"];
+
+export interface CashbookActivity {
+  id: string;
+  source: "entry" | "transfer";
+  kind: CashbookActivityKind;
+  status: CashbookActivityStatus;
+  occurredOn: string;
+  createdAt: string;
+  description: string;
+  paymentMethod: string;
+  note: string;
+  personId: string | null;
+  fromPersonId: string | null;
+  toPersonId: string | null;
+  amount: number;
+  delta: number;
+  runningBalance: number | null;
+}
+
+export interface CashbookLedger {
+  deposited: number;
+  withdrawn: number;
+  balance: number;
+  activities: CashbookActivity[];
+}
+
+export function buildCashbookLedger(
+  entries: LedgerEntry[],
+  transfers: FundTransfer[],
+  personId: string | null,
+): CashbookLedger {
+  const activities: CashbookActivity[] = [];
+
+  for (const entry of entries) {
+    if (entry.status === "void" || (personId && entry.personId !== personId)) continue;
+    const delta = entry.kind === "income" ? entry.amount : -entry.amount;
+    activities.push({
+      id: entry.id,
+      source: "entry",
+      kind: entry.kind,
+      status: entry.status,
+      occurredOn: entry.occurredOn,
+      createdAt: entry.createdAt,
+      description: entry.description,
+      paymentMethod: entry.paymentMethod,
+      note: entry.note,
+      personId: entry.personId,
+      fromPersonId: null,
+      toPersonId: null,
+      amount: entry.amount,
+      delta,
+      runningBalance: null,
+    });
+  }
+
+  for (const transfer of transfers) {
+    if (transfer.status === "void") continue;
+    let kind: CashbookActivityKind = "transfer";
+    let delta = 0;
+    if (personId) {
+      if (transfer.fromPersonId === personId) {
+        kind = "transfer-out";
+        delta = -transfer.amount;
+      } else if (transfer.toPersonId === personId) {
+        kind = "transfer-in";
+        delta = transfer.amount;
+      } else {
+        continue;
+      }
+    }
+    activities.push({
+      id: transfer.id,
+      source: "transfer",
+      kind,
+      status: transfer.status,
+      occurredOn: transfer.occurredOn,
+      createdAt: transfer.createdAt,
+      description: transfer.note || "人員間資金移轉",
+      paymentMethod: transfer.paymentMethod,
+      note: transfer.note,
+      personId: null,
+      fromPersonId: transfer.fromPersonId,
+      toPersonId: transfer.toPersonId,
+      amount: transfer.amount,
+      delta,
+      runningBalance: null,
+    });
+  }
+
+  let balance = 0;
+  let deposited = 0;
+  let withdrawn = 0;
+  const chronological = activities
+    .sort((left, right) =>
+      left.occurredOn.localeCompare(right.occurredOn) ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.id.localeCompare(right.id))
+    .map((activity) => {
+      if (activity.status !== "posted") return activity;
+      if (activity.delta > 0) deposited += activity.delta;
+      if (activity.delta < 0) withdrawn += Math.abs(activity.delta);
+      balance += activity.delta;
+      return { ...activity, runningBalance: balance };
+    });
+
+  return { deposited, withdrawn, balance, activities: chronological.reverse() };
 }
 
 export function calculateTotals(categories: Category[], entries: LedgerEntry[]): Totals {
@@ -57,49 +154,3 @@ export function categorySpent(categoryId: string, entries: LedgerEntry[]): numbe
 
 export const formatMoney = (amount: number) =>
   new Intl.NumberFormat("zh-TW", { style: "currency", currency: "TWD", maximumFractionDigits: 0 }).format(amount);
-
-export function calculatePersonBalances(
-  people: Person[],
-  entries: LedgerEntry[],
-  transfers: FundTransfer[],
-): PersonBalanceSummary[] {
-  return people.map((person) => {
-    let balance = 0;
-    for (const entry of entries) {
-      if (entry.personId !== person.id || entry.status !== "posted") continue;
-      if (entry.kind === "expense") balance -= entry.amount;
-      if (entry.kind === "income") balance += entry.amount;
-    }
-    for (const transfer of transfers) {
-      if (transfer.status !== "posted") continue;
-      if (transfer.fromPersonId === person.id) balance -= transfer.amount;
-      if (transfer.toPersonId === person.id) balance += transfer.amount;
-    }
-    return { person, balance };
-  }).sort((left, right) => right.balance - left.balance || left.person.name.localeCompare(right.person.name, "zh-Hant"));
-}
-
-export function calculatePersonCashbookSummaries(
-  people: Person[],
-  entries: LedgerEntry[],
-  transfers: FundTransfer[],
-): PersonCashbookSummary[] {
-  const balances = new Map(calculatePersonBalances(people, entries, transfers)
-    .map(({ person, balance }) => [person.id, balance]));
-
-  return people.map((person) => {
-    let income = 0;
-    let paid = 0;
-    for (const entry of entries) {
-      if (entry.personId !== person.id || entry.status !== "posted") continue;
-      if (entry.kind === "income") income += entry.amount;
-      if (entry.kind === "expense") paid += entry.amount;
-    }
-    return {
-      person,
-      income,
-      paid,
-      cashOnHand: balances.get(person.id) ?? 0,
-    };
-  }).sort((left, right) => left.person.name.localeCompare(right.person.name, "zh-Hant"));
-}
