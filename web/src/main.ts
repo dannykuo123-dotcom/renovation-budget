@@ -1,4 +1,6 @@
 import "./style.css";
+import "./phosphor-subset.css";
+import "./minimal-ledger.css";
 import {
   ApiError,
   createProject,
@@ -25,6 +27,8 @@ import { readCachedFilters, writeCachedFilters } from "./filter-cache";
 import { buildCashbookLedger, calculateTotals, categorySpent, formatMoney, sortCashbookActivities, type CashbookActivity } from "./finance";
 import { renderCashbookPage, type CashbookFilters } from "./cashbook-page";
 import { parseRoute, projectRoute, projectsRoute, type ProjectView } from "./router";
+import { personInitial } from "./cashbook-view";
+import { defaultTransferPeople, entryStatusChoices, entryStatusValue, paymentMethodChoices, transferStatusChoices } from "./ledger-form-view";
 import type {
   Category,
   DashboardPayload,
@@ -61,7 +65,6 @@ const esc = (value: string) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
 const dateLabel = (date: string) =>
   new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric" }).format(new Date(`${date}T00:00:00`));
-const kindLabel: Record<EntryKind, string> = { income: "資金入帳", expense: "支出" };
 const projectStatusLabel: Record<ProjectStatus, string> = {
   active: "進行中",
   completed: "已完工",
@@ -146,13 +149,6 @@ function persistViewFilters(view: ProjectView): void {
 
 function personShortName(id: string | null): string {
   return personById(id)?.name ?? "未指定";
-}
-
-function activePersonOptions(selectedId: string | null, includeInactive = false): string {
-  const people = payload!.people.filter((person) => person.active || person.id === selectedId || includeInactive);
-  return `<option value="">請選擇人員</option>${people.map((person) =>
-    `<option value="${person.id}" ${person.id === selectedId ? "selected" : ""}>${esc(person.name)}${person.role ? `（${esc(person.role)}）` : ""}${person.active ? "" : "（已停用）"}</option>`,
-  ).join("")}`;
 }
 
 function entryAmountSign(entry: LedgerEntry): string {
@@ -319,7 +315,7 @@ function projectCard(project: ProjectSummary): string {
 }
 
 function navLink(view: ProjectView, icon: string, label: string, current: ProjectView) {
-  return `<a class="nav-item ${view === current ? "active" : ""}" href="${projectRoute(currentProjectId(), view)}"><span>${icon}</span>${label}</a>`;
+  return `<a class="nav-item ${view === current ? "active" : ""}" href="${projectRoute(currentProjectId(), view)}"><i class="ph ${icon}" aria-hidden="true"></i><span>${label}</span></a>`;
 }
 
 function layout(content: string, view: ProjectView) {
@@ -331,36 +327,33 @@ function layout(content: string, view: ProjectView) {
     settings: "工程設定",
   };
   app.innerHTML = `
-    <div class="shell">
-      <aside class="sidebar">
-        <a class="logo" href="${projectsRoute()}">
-          <span>虹</span><div><strong>彩虹水電</strong><small>工程預算管理</small></div>
-        </a>
-        <a class="project-switcher" href="${projectsRoute()}"><small>目前工程</small><strong>${esc(project.name)}</strong><span>切換工程 ›</span></a>
-        <nav>
-          ${navLink("dashboard", "⌂", "總覽", view)}
-          ${navLink("budget", "▦", "預算分類", view)}
-          ${navLink("cashflow", "&#8644;", "工程帳本", view)}
-          ${navLink("settings", "⚙", "工程設定", view)}
+    <div class="shell topbar-shell">
+      <header class="glass-topbar">
+        <div class="brand-zone">
+          <a class="brand-lockup" href="${projectsRoute()}" aria-label="彩虹室內設計，返回所有工程">
+            <img src="/rainbow-interior-logo.svg" alt="" width="42" height="42" />
+            <span><strong>彩虹室內設計</strong><small>RAINBOW INTERIOR DESIGN</small></span>
+          </a>
+          <a class="project-chip" href="${projectsRoute()}" title="切換工程">
+            <span>${esc(project.name)}</span><i class="ph ph-caret-down" aria-hidden="true"></i>
+          </a>
+        </div>
+        <nav class="top-nav" aria-label="工程導覽">
+          ${navLink("dashboard", "ph-house", "總覽", view)}
+          ${navLink("budget", "ph-chart-donut", "預算", view)}
+          ${navLink("cashflow", "ph-notebook", "帳本", view)}
+          ${navLink("settings", "ph-sliders-horizontal", "設定", view)}
         </nav>
-        <div class="sidebar-foot"><span class="live-dot"></span><small>${isDemoMode ? "本機資料模式" : "雲端資料已連線"}</small></div>
-      </aside>
+        <div class="topbar-actions">
+          <span class="connection-state" title="${isDemoMode ? "本機資料模式" : "雲端資料已連線"}"><i></i></span>
+          <button class="icon-button" data-action="refresh" aria-label="重新整理"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i></button>
+          <button class="avatar" data-action="logout" aria-label="登出"><i class="ph ph-sign-out" aria-hidden="true"></i></button>
+        </div>
+      </header>
       <main class="main">
-        <header class="topbar">
-          <div><a class="mobile-back" href="${projectsRoute()}">‹ 所有工程</a><p class="eyebrow">${esc(project.name)}</p><h2>${title[view]}</h2></div>
-          <div class="top-actions">
-            <button class="icon-button" data-action="refresh" aria-label="重新整理">↻</button>
-            <button class="avatar" data-action="logout" title="登出">登</button>
-          </div>
-        </header>
+        <header class="page-heading"><h2>${title[view]}</h2></header>
         ${content}
       </main>
-      <nav class="mobile-nav">
-        ${navLink("dashboard", "⌂", "總覽", view)}
-        ${navLink("budget", "▦", "預算", view)}
-        ${navLink("cashflow", "&#8644;", "帳本", view)}
-        ${navLink("settings", "•••", "更多", view)}
-      </nav>
     </div>`;
   bindCommon();
 }
@@ -775,62 +768,122 @@ function openCategoryModal(existing?: Category) {
   });
 }
 
+interface FormChoice {
+  value: string;
+  label: string;
+}
+
+function directChoiceButtons(
+  name: string,
+  choices: FormChoice[],
+  selectedValue: string,
+  className = "",
+): string {
+  const selected = choices.some((choice) => choice.value === selectedValue)
+    ? selectedValue
+    : (choices[0]?.value ?? "");
+  return `<div class="direct-choice-group ${className}" role="group">
+    ${choices.map((choice) => `<button class="direct-choice-button${choice.value === selected ? " selected" : ""}" type="button" data-direct-choice data-choice-name="${esc(name)}" data-choice-value="${esc(choice.value)}" aria-pressed="${choice.value === selected}">
+      ${className.includes("person-choices") ? `<span class="choice-avatar" aria-hidden="true">${esc(personInitial(choice.label))}</span>` : ""}
+      <span>${esc(choice.label)}</span>
+    </button>`).join("")}
+    <input name="${esc(name)}" type="hidden" value="${esc(selected)}" />
+  </div>`;
+}
+
+function bindDirectChoices(form: HTMLFormElement): void {
+  form.querySelectorAll<HTMLButtonElement>("[data-direct-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const name = button.dataset.choiceName ?? "";
+      const group = button.closest<HTMLElement>(".direct-choice-group");
+      const input = group?.querySelector<HTMLInputElement>(`input[name="${CSS.escape(name)}"]`);
+      if (!group || !input) return;
+      input.value = button.dataset.choiceValue ?? "";
+      group.querySelectorAll<HTMLButtonElement>("[data-direct-choice]").forEach((choice) => {
+        const active = choice === button;
+        choice.classList.toggle("selected", active);
+        choice.setAttribute("aria-pressed", String(active));
+      });
+    });
+  });
+}
+
+function personChoiceButtons(name: string, selectedId: string | null): string {
+  const people = payload!.people.filter((person) => person.active || person.id === selectedId);
+  return directChoiceButtons(
+    name,
+    people.map((person) => ({ value: person.id, label: person.name })),
+    selectedId ?? "",
+    "person-choices",
+  );
+}
+
+function dateField(name: string, value: string): string {
+  return `<span class="date-input-wrap">
+    <i class="ph ph-calendar-blank" aria-hidden="true"></i>
+    <input name="${esc(name)}" type="date" required value="${esc(value)}" />
+  </span>`;
+}
+
 function openEntryModal(existing?: LedgerEntry, defaultKind: EntryKind = "expense", defaultPersonId: string | null = null) {
   const kind = existing?.kind ?? defaultKind;
   const selectedPersonId = existing?.personId ?? defaultPersonId;
-  const categoryOptions = `<option value="">不指定分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${(existing?.categoryId ?? "") === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}`;
-  const personLabel = kind === "income" ? "收款人／目前持有人" : "付款人／代墊人";
+  const categories = [{ value: "", label: "不分類" }, ...payload!.categories.map((category) => ({ value: category.id, label: category.name }))];
+  const selectedStatus = existing?.status === "pending" ? "pending" : "posted";
   openModal(`
-    <div class="modal-head"><div><p class="eyebrow">${kindLabel[kind]}</p><h3>${existing ? "編輯紀錄" : `新增${kindLabel[kind]}`}</h3></div><button class="icon-button" data-action="close-modal">×</button></div>
-    <form id="entry-form" class="form-grid">
-      <label>紀錄類型<input value="${kindLabel[kind]}" readonly aria-readonly="true" /></label><input name="kind" type="hidden" value="${kind}" />
-      <label>品項／用途<input name="description" maxlength="80" required value="${esc(existing?.description ?? "")}" placeholder="例如：一樓配電材料" /></label>
-      <label>金額<input name="amount" type="number" min="1" step="1" required value="${existing?.amount ?? ""}" /></label>
-      <label>日期<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
-      <label>預算分類<select name="categoryId">${categoryOptions}</select></label>
-      <label>${personLabel}<select name="personId" required>${activePersonOptions(selectedPersonId)}</select></label>
-      <label>付款方式<select name="paymentMethod"><option value="">未指定</option>${["銀行轉帳", "現金", "信用卡", "電子支付"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
-      <label>狀態<select name="status"></select></label>
-      <p class="form-hint full"></p>
-      <label class="full">備註<textarea name="note" maxlength="500" placeholder="保固、報價或付款說明">${esc(existing?.note ?? "")}</textarea></label>
-      <label class="full upload-field">憑證照片（JPG、PNG、WebP；最多 5 張，每張 10MB）<input name="files" type="file" accept="image/jpeg,image/png,image/webp" multiple /></label>
-      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存紀錄</button></div>
+    <div class="modal-head minimal-modal-head"><h3>${existing ? "編輯" : `新增${kind === "income" ? "收入" : "支出"}`}</h3><button class="icon-button" data-action="close-modal" aria-label="關閉"><i class="ph ph-x" aria-hidden="true"></i></button></div>
+    <form id="entry-form" class="form-grid minimal-form">
+      <input name="kind" type="hidden" value="${kind}" />
+      <input name="status" type="hidden" value="${entryStatusValue(kind, selectedStatus)}" />
+      <label class="full"><span class="field-label">項目</span><input name="description" maxlength="80" required value="${esc(existing?.description ?? "")}" placeholder="輸入項目" autofocus /></label>
+      <label><span class="field-label">金額</span><input name="amount" type="number" min="1" step="1" required inputmode="numeric" value="${existing?.amount ?? ""}" placeholder="0" /></label>
+      <label><span class="field-label">日期</span>${dateField("occurredOn", existing?.occurredOn ?? new Date().toISOString().slice(0, 10))}</label>
+      <div class="full choice-field"><span class="field-label">${kind === "income" ? "收款人" : "付款人"}</span>${personChoiceButtons("personId", selectedPersonId)}</div>
+      ${kind === "expense" ? `<div class="full choice-field"><span class="field-label">分類</span>${directChoiceButtons("categoryId", categories, existing?.categoryId ?? "")}</div>` : '<input name="categoryId" type="hidden" value="" />'}
+      <div class="full choice-field"><span class="field-label">付款方式</span>${directChoiceButtons("paymentMethod", paymentMethodChoices, existing?.paymentMethod ?? "")}</div>
+      ${entryStatusChoices(kind).length ? `<div class="full choice-field"><span class="field-label">狀態</span>${directChoiceButtons("status", entryStatusChoices(kind), selectedStatus)}</div>` : ""}
+      <label class="full minimal-note"><span class="field-label">備註</span><textarea name="note" maxlength="500" placeholder="選填">${esc(existing?.note ?? "")}</textarea></label>
+      <label class="full upload-field">
+        <input class="upload-input" name="files" type="file" accept="image/jpeg,image/png,image/webp" multiple />
+        <span class="upload-dropzone">
+          <i class="ph ph-upload-simple" aria-hidden="true"></i>
+          <strong>上傳憑證</strong>
+          <small data-upload-status>拖曳或點擊選擇</small>
+        </span>
+      </label>
+      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存</button></div>
     </form>`);
   const formElement = document.querySelector<HTMLFormElement>("#entry-form")!;
-  const kindInput = formElement.elements.namedItem("kind") as HTMLInputElement;
-  const statusInput = formElement.elements.namedItem("status") as HTMLSelectElement;
-  const categoryInput = formElement.elements.namedItem("categoryId") as HTMLSelectElement;
-  const personInput = formElement.elements.namedItem("personId") as HTMLSelectElement;
-  const hint = formElement.querySelector<HTMLElement>(".form-hint")!;
-  const statusOptions = (selected: string) => kindInput.value === "income"
-    ? `<option value="posted" selected>已入帳</option>`
-    : `<option value="posted" ${selected === "posted" ? "selected" : ""}>已付款</option><option value="pending" ${selected === "pending" ? "selected" : ""}>待付款</option>`;
-  const sync = () => {
-    const selected = kindInput.value === "expense" ? "posted" : (statusInput.value || (existing?.status === "pending" ? "pending" : "posted"));
-    statusInput.innerHTML = statusOptions(selected);
-    categoryInput.disabled = false;
-    personInput.disabled = false;
-    hint.textContent = kindInput.value === "income"
-      ? "請選擇實際收到工程款的人；已入帳金額會增加他的手上工程款。"
-      : "已付款支出會從付款人的手上餘額扣除；若有退款，請直接刪除這筆支出紀錄。";
-  };
-  sync();
+  bindDirectChoices(formElement);
+  const uploadInput = formElement.querySelector<HTMLInputElement>(".upload-input");
+  const uploadField = uploadInput?.closest<HTMLElement>(".upload-field");
+  const uploadStatus = formElement.querySelector<HTMLElement>("[data-upload-status]");
+  uploadInput?.addEventListener("change", () => {
+    const count = uploadInput.files?.length ?? 0;
+    if (uploadStatus) uploadStatus.textContent = count ? `已選擇 ${count} 個檔案` : "拖曳或點擊選擇";
+  });
+  ["dragenter", "dragover"].forEach((type) => uploadField?.addEventListener(type, (event) => {
+    event.preventDefault();
+    uploadField.classList.add("dragging");
+  }));
+  ["dragleave", "drop"].forEach((type) => uploadField?.addEventListener(type, () => uploadField.classList.remove("dragging")));
   formElement.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(formElement);
     const files = [...(formElement.querySelector<HTMLInputElement>("[name='files']")?.files ?? [])];
+    const personId = String(form.get("personId") ?? "");
+    if (!personId) return toast("請選擇人員", "error");
     if (files.length + (existing?.attachments.length ?? 0) > 5 ||
       files.some((file) => file.size > 10 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(file.type))) {
       return toast("每筆最多 5 張 JPG、PNG、WebP，且每張不得超過 10MB。", "error");
     }
     try {
       const projectId = currentProjectId();
-      const selectedPersonId = personInput.value || null;
-      const selectedPerson = personById(selectedPersonId);
+      const selectedPerson = personById(personId);
       const result = await saveEntry(projectId, {
         kind: String(form.get("kind")) as EntryKind,
         status: String(form.get("status")) as LedgerEntry["status"],
-        personId: selectedPersonId,
+        personId,
         counterparty: selectedPerson?.name ?? existing?.counterparty ?? "",
         description: String(form.get("description")).trim(),
         amount: Number(form.get("amount")),
@@ -872,28 +925,41 @@ function openPersonModal(existing?: Person) {
 }
 
 function openTransferModal(existing?: FundTransfer) {
-  const active = payload!.people.filter((person) => person.active || person.id === existing?.fromPersonId || person.id === existing?.toPersonId);
-  const optionList = (selected: string | undefined) => `<option value="">請選擇人員</option>${active.map((person) => `<option value="${person.id}" ${person.id === selected ? "selected" : ""}>${esc(person.name)}${person.role ? `（${esc(person.role)}）` : ""}${person.active ? "" : "（已停用）"}</option>`).join("")}`;
+  const activePersonIds = payload!.people
+    .filter((person) => person.active)
+    .map((person) => person.id);
+  const selectedPeople = defaultTransferPeople(
+    activePersonIds,
+    existing?.fromPersonId,
+    existing?.toPersonId,
+  );
+  const selectedStatus = existing?.status === "pending" ? "pending" : "posted";
   openModal(`
-    <div class="modal-head"><div><p class="eyebrow">TRANSFER</p><h3>${existing ? "編輯資金移轉" : "新增資金移轉"}</h3></div><button class="icon-button" data-action="close-modal" aria-label="關閉">×</button></div>
-    <form id="transfer-form" class="form-grid">
-      <label>轉出人<select name="fromPersonId" required>${optionList(existing?.fromPersonId)}</select></label>
-      <label>轉入人<select name="toPersonId" required>${optionList(existing?.toPersonId)}</select></label>
-      <label>金額<input name="amount" type="number" min="1" step="1" required value="${existing?.amount ?? ""}" /></label>
-      <label>日期<input name="occurredOn" type="date" required value="${existing?.occurredOn ?? new Date().toISOString().slice(0, 10)}" /></label>
-      <label>付款方式<select name="paymentMethod"><option value="">未指定</option>${["銀行轉帳", "現金", "信用卡", "電子支付"].map((method) => `<option ${existing?.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
-      <label>狀態<select name="status"><option value="posted" ${existing?.status !== "pending" && existing?.status !== "void" ? "selected" : ""}>已完成</option><option value="pending" ${existing?.status === "pending" ? "selected" : ""}>待處理</option><option value="void" ${existing?.status === "void" ? "selected" : ""}>已作廢</option></select></label>
-      <label class="full">備註<textarea name="note" maxlength="500">${esc(existing?.note ?? "")}</textarea></label>
-      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存移轉</button></div>
+    <div class="modal-head minimal-modal-head"><h3>${existing ? "編輯轉移" : "新增轉移"}</h3><button class="icon-button" data-action="close-modal" aria-label="關閉"><i class="ph ph-x" aria-hidden="true"></i></button></div>
+    <form id="transfer-form" class="form-grid minimal-form">
+      <div class="full choice-field"><span class="field-label">轉出</span>${personChoiceButtons("fromPersonId", selectedPeople.fromPersonId)}</div>
+      <div class="full choice-field"><span class="field-label">轉入</span>${personChoiceButtons("toPersonId", selectedPeople.toPersonId)}</div>
+      <label><span class="field-label">金額</span><input name="amount" type="number" min="1" step="1" required inputmode="numeric" value="${existing?.amount ?? ""}" placeholder="0" /></label>
+      <label><span class="field-label">日期</span>${dateField("occurredOn", existing?.occurredOn ?? new Date().toISOString().slice(0, 10))}</label>
+      <div class="full choice-field"><span class="field-label">付款方式</span>${directChoiceButtons("paymentMethod", paymentMethodChoices, existing?.paymentMethod ?? "")}</div>
+      <div class="full choice-field"><span class="field-label">狀態</span>${directChoiceButtons("status", transferStatusChoices, selectedStatus)}</div>
+      <label class="full minimal-note"><span class="field-label">備註</span><textarea name="note" maxlength="500" placeholder="選填">${esc(existing?.note ?? "")}</textarea></label>
+      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存</button></div>
     </form>`);
-  document.querySelector<HTMLFormElement>("#transfer-form")!.addEventListener("submit", async (event) => {
+  const formElement = document.querySelector<HTMLFormElement>("#transfer-form")!;
+  bindDirectChoices(formElement);
+  formElement.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget as HTMLFormElement);
+    const form = new FormData(formElement);
+    const fromPersonId = String(form.get("fromPersonId") ?? "");
+    const toPersonId = String(form.get("toPersonId") ?? "");
+    if (!fromPersonId || !toPersonId) return toast("請選擇轉出與轉入人員", "error");
+    if (fromPersonId === toPersonId) return toast("轉出與轉入人員不能相同", "error");
     try {
-      await saveTransfer(currentProjectId(), { fromPersonId: String(form.get("fromPersonId")), toPersonId: String(form.get("toPersonId")), amount: Number(form.get("amount")), occurredOn: String(form.get("occurredOn")), status: String(form.get("status")) as FundTransfer["status"], paymentMethod: String(form.get("paymentMethod")), note: String(form.get("note")).trim() }, existing?.id);
+      await saveTransfer(currentProjectId(), { fromPersonId, toPersonId, amount: Number(form.get("amount")), occurredOn: String(form.get("occurredOn")), status: String(form.get("status")) as FundTransfer["status"], paymentMethod: String(form.get("paymentMethod")), note: String(form.get("note")).trim() }, existing?.id);
       document.querySelector(".modal-backdrop")?.remove();
       await refresh();
-      toast("資金移轉已儲存");
+      toast("轉移已儲存");
     } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
   });
 }

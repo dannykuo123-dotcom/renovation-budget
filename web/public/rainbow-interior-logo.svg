@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">彩虹室內設計</title>
+  <defs>
+    <linearGradient id="rainbow" x1="4" y1="4" x2="60" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8fe6cb">
+        <animate attributeName="stop-color" values="#8fe6cb;#a7b8ff;#ffd19b;#8fe6cb" dur="7s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset=".5" stop-color="#6d8df7">
+        <animate attributeName="stop-color" values="#6d8df7;#ed8db5;#6fc9bd;#6d8df7" dur="7s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="1" stop-color="#f2a56f">
+        <animate attributeName="stop-color" values="#f2a56f;#7bd8bf;#b397f4;#f2a56f" dur="7s" repeatCount="indefinite"/>
+      </stop>
+    </linearGradient>
+    <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#153d35" flood-opacity=".2"/>
+    </filter>
+  </defs>
+  <rect x="5" y="5" width="54" height="54" rx="18" fill="url(#rainbow)" filter="url(#soft-shadow)"/>
+  <path d="M18 41V24.5C18 21.5 20.5 19 23.5 19H33c7.2 0 12 4 12 10.2 0 4.2-2.3 7.4-6.2 9l7.2 6.8h-8.2l-6.3-6.1H25V45h-7Zm7-15v7h7.4c3.5 0 5.4-1.2 5.4-3.6 0-2.3-1.9-3.4-5.4-3.4H25Z" fill="#123b34"/>
+  <path d="M20 16h24" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".75">
+    <animate attributeName="opacity" values=".45;.9;.45" dur="3.5s" repeatCount="indefinite"/>
+  </path>
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      animate { display: none; }
+    }
+  </style>
+</svg>

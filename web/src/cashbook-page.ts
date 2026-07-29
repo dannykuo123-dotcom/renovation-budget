@@ -1,4 +1,5 @@
 import "./cashbook-page.css";
+import "./cashbook-minimal.css";
 import {
   buildCashbookLedger,
   calculateTotals,
@@ -283,16 +284,20 @@ export function renderCashbookPage(options: CashbookPageOptions): void {
       <article class="summary-balance"><small>餘額</small><strong>${formatCashbookNumber(totals.cashBalance)}</strong></article>
     </section>
     ${unassignedCount ? `<div class="cashflow-warning">有 ${unassignedCount} 筆帳務尚未指定人員；全部模式仍會顯示，人員篩選時不會列入。</div>` : ""}
-    <section class="cashbook-direct-filters">
-      <div class="cashbook-filter-row"><span class="cashbook-filter-label">類型</span><div class="cashbook-filter-options">${typeFilters}</div></div>
+    <section class="cashbook-filter-deck">
       <div class="cashbook-filter-row"><span class="cashbook-filter-label">人員</span><div class="cashbook-filter-options cashbook-people-options">${peopleFilters}</div></div>
-      <div class="cashbook-filter-row"><span class="cashbook-filter-label">分類</span><div class="cashbook-filter-options">${categoryFilters}</div></div>
+      <div class="cashbook-filter-row cashbook-filter-combined">
+        <div class="cashbook-filter-group"><span class="cashbook-filter-label">類型</span><div class="cashbook-filter-options">${typeFilters}</div></div>
+        ${payload.categories.length ? `<div class="cashbook-filter-group"><span class="cashbook-filter-label">分類</span><div class="cashbook-filter-options">${categoryFilters}</div></div>` : ""}
+      </div>
     </section>
     <section class="cashbook-list-toolbar">
-      <small>${activities.length} 筆</small>
+      <small class="cashbook-result-count">${activities.length} 筆</small>
       <input class="cashbook-search-input" id="cashbook-search-input" type="search" aria-label="搜尋項目、人員或備註" placeholder="搜尋項目、人員或備註" value="${esc(filters.query)}" ${filters.query ? "" : "hidden"} />
-      <button class="secondary cashbook-date-sort" id="cashbook-date-sort" type="button" aria-label="切換日期排序">日期 ${filters.sortDirection === "desc" ? "↓" : "↑"}</button>
-      <button class="secondary cashbook-search-toggle" id="cashbook-search-toggle" type="button" aria-label="搜尋">⌕</button>
+      <button class="secondary cashbook-date-sort" id="cashbook-date-sort" type="button" aria-label="切換日期排序">
+        <i class="ph ${filters.sortDirection === "desc" ? "ph-sort-descending" : "ph-sort-ascending"}" aria-hidden="true"></i><span>日期</span>
+      </button>
+      <button class="secondary cashbook-search-toggle" id="cashbook-search-toggle" type="button" aria-label="搜尋"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></button>
     </section>
     <section class="panel table-panel cashbook-ledger-desktop"><div class="table-wrap"><table class="cashbook-ledger-table">
       <thead><tr><th>人員</th><th>日期</th><th>項目</th><th>金額</th></tr></thead>
