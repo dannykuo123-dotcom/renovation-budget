@@ -573,7 +573,7 @@ function renderCashflow() {
       <label>交易類型<select id="cashbook-type"><option value="all" ${cashbookTypeFilter === "all" ? "selected" : ""}>全部類型</option><option value="income" ${cashbookTypeFilter === "income" ? "selected" : ""}>收入</option><option value="expense" ${cashbookTypeFilter === "expense" ? "selected" : ""}>支出</option><option value="transfer" ${cashbookTypeFilter === "transfer" ? "selected" : ""}>資金移轉</option></select></label>
       <label>入帳狀態<select id="cashbook-status"><option value="posted" ${cashbookStatusFilter === "posted" ? "selected" : ""}>已完成</option><option value="pending" ${cashbookStatusFilter === "pending" ? "selected" : ""}>待處理</option></select></label>
     </section>
-    <section class="cashbook-section-heading"><div><p class="eyebrow">PASSBOOK</p><h3>收支明細</h3></div><small>${activities.length} 筆符合條件的交易 · 日期由${cashbookDateSortDirection === "desc" ? "新到舊" : "舊到新"}</small></section>
+    <section class="cashbook-section-heading"><div><p class="eyebrow">PASSBOOK</p><h3>收支明細</h3></div><div class="cashbook-heading-tools"><small>${activities.length} 筆符合條件的交易</small><button class="secondary mobile-cashbook-sort" data-sort-cashbook-date aria-label="切換日期排序">日期 ${cashbookDateSortDirection === "desc" ? "新 → 舊 ↓" : "舊 → 新 ↑"}</button></div></section>
     <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="passbook-table"><thead><tr><th><button class="sort-button" data-sort-cashbook-date>日期 ${cashbookDateSortDirection === "asc" ? "↑" : "↓"}</button></th><th>摘要</th><th>相關人員</th><th>存入</th><th>支出</th><th>當時餘額</th><th>狀態</th><th></th></tr></thead><tbody>${activities.map(activityRow).join("") || '<tr><td colspan="8" class="empty">目前沒有符合條件的交易。</td></tr>'}</tbody></table></div></section>
     <section class="mobile-record-list">${activities.map(activityCard).join("") || '<div class="panel empty">目前沒有符合條件的交易。</div>'}</section>`, "cashflow");
   document.querySelector<HTMLSelectElement>("#cashbook-person")?.addEventListener("change", (event) => {
@@ -588,10 +588,11 @@ function renderCashflow() {
     cashbookStatusFilter = (event.target as HTMLSelectElement).value as CashbookStatusFilter;
     renderCashflow();
   });
-  document.querySelector<HTMLElement>("[data-sort-cashbook-date]")?.addEventListener("click", () => {
-    cashbookDateSortDirection = cashbookDateSortDirection === "desc" ? "asc" : "desc";
-    renderCashflow();
-  });
+  document.querySelectorAll<HTMLElement>("[data-sort-cashbook-date]").forEach((button) =>
+    button.addEventListener("click", () => {
+      cashbookDateSortDirection = cashbookDateSortDirection === "desc" ? "asc" : "desc";
+      renderCashflow();
+    }));
 }
 
 function renderSettings() {
