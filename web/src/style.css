@@ -244,7 +244,7 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
   .cashbook-intro { align-items: stretch; flex-direction: column; gap: 11px; margin-bottom: 13px; }
   .cashbook-intro h3 { font-size: 19px; }.cashbook-intro p:last-child { font-size: 13px; line-height: 1.5; }
   .cashbook-overview { grid-template-columns: 1fr 1fr; gap: 9px; }.cashbook-overview article { min-height: 104px; padding: 14px; }.cashbook-overview strong { font-size: 19px; }.cashbook-overview span { font-size: 10px; }
-  .cashbook-tabs { margin-top: 18px; }.cashbook-tabs button { flex: 1; min-height: 39px; padding: 7px 8px; }
+  .cashbook-tabs { flex-wrap: nowrap; margin-top: 18px; overflow-x: auto; padding-bottom: 2px; }.cashbook-tabs button { flex: 0 0 auto; min-height: 39px; padding: 7px 12px; white-space: nowrap; }
   .cashbook-section-heading { align-items: flex-start; flex-direction: column; gap: 6px; margin-top: 22px; }.cashbook-section-heading small { font-size: 12px; line-height: 1.45; }
   .person-cash-grid, .person-expense-grid { grid-template-columns: 1fr; gap: 9px; }.person-cash-card, .person-expense-card { padding: 14px; }
   .person-cash-values { padding: 11px 0; }.person-cash-values b { font-size: 13px; }.person-cash-balance { padding: 9px 10px; }.person-cash-balance strong { font-size: 16px; }

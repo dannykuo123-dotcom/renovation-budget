@@ -49,8 +49,8 @@ let budgetSortKey: BudgetSortKey = "sortOrder";
 let budgetSortDirection: SortDirection = "asc";
 let entrySortKey: EntrySortKey = "occurredOn";
 let entrySortDirection: SortDirection = "desc";
-type CashbookTab = "all" | "income" | "expenses";
-let cashbookTab: CashbookTab = "all";
+type CashbookTab = "overview" | "all" | "income" | "expenses" | "transfers";
+let cashbookTab: CashbookTab = "overview";
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 const esc = (value: string) =>
@@ -512,11 +512,11 @@ function renderCashflow() {
     .filter((entry) => entry.status !== "void")
     .sort((left, right) => right.occurredOn.localeCompare(left.occurredOn) || right.createdAt.localeCompare(left.createdAt));
   const displayedEntries = entries.filter((entry) =>
-    cashbookTab === "all" || (cashbookTab === "income" ? entry.kind === "income" : entry.kind !== "income"));
+    cashbookTab === "all" || (cashbookTab === "income" && entry.kind === "income"));
   const transfers = [...payload!.transfers].sort((left, right) =>
     right.occurredOn.localeCompare(left.occurredOn) || right.createdAt.localeCompare(left.createdAt));
   const unassignedCount = entries.filter((entry) => entry.status === "posted" && !entry.personId).length;
-  const tabLabel: Record<CashbookTab, string> = { all: "全部", income: "收入", expenses: "支出" };
+  const tabLabel: Record<CashbookTab, string> = { overview: "總覽", all: "全部帳務", income: "收入", expenses: "支出", transfers: "資金移轉" };
   const entryType = (entry: LedgerEntry) => entry.kind === "income" ? "收入" : entry.kind === "refund" ? "已退費" : "支出";
   const entryRow = (entry: LedgerEntry) => `<tr>
     <td>${dateLabel(entry.occurredOn)}</td>
@@ -549,23 +549,29 @@ function renderCashflow() {
     ? '<button class="primary" data-action="new-entry" data-kind="income">＋ 新增收入</button>'
     : cashbookTab === "expenses"
       ? '<button class="secondary" data-action="new-entry" data-kind="refund">↩ 新增退款</button><button class="primary" data-action="new-entry" data-kind="expense">＋ 新增支出</button>'
-      : '<button class="secondary" data-action="new-entry" data-kind="income">＋ 新增收入</button><button class="primary" data-action="new-entry" data-kind="expense">＋ 新增支出</button>';
+      : cashbookTab === "transfers"
+        ? '<button class="secondary" data-action="export-cashflow">下載移轉 CSV</button><button class="primary" data-action="new-transfer">↔ 新增資金移轉</button>'
+        : '<button class="secondary" data-action="new-entry" data-kind="income">＋ 新增收入</button><button class="primary" data-action="new-entry" data-kind="expense">＋ 新增支出</button>';
   layout(`
-    <section class="cashbook-intro"><div><p class="eyebrow">PROJECT CASHBOOK</p><h3>收入、支出與退款，一本看清楚</h3><p>收入指定目前收款人；支出列在付款人名下；退款獨立記錄並自動加回工程款。</p></div><div class="entry-action-buttons">${actions}</div></section>
-    <section class="cashbook-overview"><article><small>總收入</small><strong class="income">${formatMoney(totals.received)}</strong><span>所有已入帳工程款</span></article><article><small>已付款</small><strong>${formatMoney(entries.filter((entry) => entry.kind === "expense" && entry.status === "posted").reduce((sum, entry) => sum + entry.amount, 0))}</strong><span>退款前的實際付款</span></article><article><small>已退費</small><strong class="income">${formatMoney(totals.returned)}</strong><span>已退回工程款</span></article><article class="cashbook-balance"><small>工程款剩餘</small><strong>${formatMoney(totals.cashBalance)}</strong><span>總收入 − 淨支出</span></article></section>
-    ${unassignedCount ? `<div class="cashflow-warning">有 ${unassignedCount} 筆已完成帳務尚未指定人員；它們會計入工程總額，但不會出現在個人帳本。</div>` : ""}
-    <section class="cashbook-tabs" aria-label="帳本分類">${(["all", "income", "expenses"] as CashbookTab[]).map((tab) => `<button class="${cashbookTab === tab ? "active" : ""}" data-cashbook-tab="${tab}">${tabLabel[tab]}</button>`).join("")}</section>
-    ${cashbookTab === "expenses" ? `
+    <section class="cashbook-intro"><div><p class="eyebrow">PROJECT CASHBOOK</p><h3>${cashbookTab === "overview" ? "工程款總覽" : tabLabel[cashbookTab]}</h3><p>${cashbookTab === "overview" ? "先看工程款剩多少、每個人手上有多少，再到各分頁處理明細。" : cashbookTab === "income" ? "只顯示實際收進工程款的紀錄，並標示目前收款人。" : cashbookTab === "expenses" ? "支出依付款人分開，退款獨立列示並自動扣回淨支出。" : cashbookTab === "transfers" ? "只管理人員之間的工程款移轉，不會改變總收入、總支出或工程款剩餘。" : "收入、支出與退款會以正負號清楚區分。"}</p></div><div class="entry-action-buttons">${actions}</div></section>
+    <section class="cashbook-tabs" aria-label="帳本分類">${(["overview", "all", "income", "expenses", "transfers"] as CashbookTab[]).map((tab) => `<button class="${cashbookTab === tab ? "active" : ""}" data-cashbook-tab="${tab}">${tabLabel[tab]}</button>`).join("")}</section>
+    ${cashbookTab === "overview" ? `
+      <section class="cashbook-overview"><article><small>總收入</small><strong class="income">${formatMoney(totals.received)}</strong><span>所有已入帳工程款</span></article><article><small>已付款</small><strong>${formatMoney(entries.filter((entry) => entry.kind === "expense" && entry.status === "posted").reduce((sum, entry) => sum + entry.amount, 0))}</strong><span>退款前的實際付款</span></article><article><small>已退費</small><strong class="income">${formatMoney(totals.returned)}</strong><span>已退回工程款</span></article><article class="cashbook-balance"><small>工程款剩餘</small><strong>${formatMoney(totals.cashBalance)}</strong><span>總收入 − 淨支出</span></article></section>
+      ${unassignedCount ? `<div class="cashflow-warning">有 ${unassignedCount} 筆已完成帳務尚未指定人員；它們會計入工程總額，但不會出現在個人帳本。</div>` : ""}
+      <section class="cashbook-section-heading"><div><p class="eyebrow">PERSONAL SUMMARY</p><h3>個人收支與手上工程款</h3></div><small>已付款是人員實際支出；已收款只計入收取／保管的工程款。</small></section>
+      <section class="person-cash-grid">${personSummaryCards || '<div class="panel empty">請先到工程設定新增人員</div>'}</section>
+    ` : cashbookTab === "expenses" ? `
       <section class="cashbook-section-heading"><div><p class="eyebrow">PERSONAL EXPENSES</p><h3>你和我的支出</h3></div><small>每個人的付款與退款分開列示；已退費會從淨支出扣除。</small></section>
       <section class="person-expense-grid">${personExpenseCards || '<div class="panel empty">請先到工程設定新增人員</div>'}</section>
+    ` : cashbookTab === "transfers" ? `
+      <section class="cashbook-section-heading"><div><p class="eyebrow">TRANSFERS</p><h3>人員間資金移轉</h3></div><small>移轉只改變誰保管工程款，不影響工程總金額。</small></section>
+      <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>日期</th><th>轉出人</th><th>轉入人</th><th>狀態</th><th>金額</th><th>備註</th><th></th></tr></thead><tbody>${transferRows || '<tr><td colspan="7" class="empty">目前沒有資金移轉紀錄</td></tr>'}</tbody></table></div></section>
+      <section class="mobile-record-list">${transferCards || '<div class="panel empty">目前沒有資金移轉紀錄</div>'}</section>
     ` : `
       <section class="cashbook-section-heading"><div><p class="eyebrow">${cashbookTab === "income" ? "INCOME" : "ALL RECORDS"}</p><h3>${cashbookTab === "income" ? "收入帳本" : "全部帳務"}</h3></div><small>${cashbookTab === "income" ? "每一筆收入都會標示目前收款人。" : "收入、支出與已退費會以正負號清楚區分。"}</small></section>
       <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>日期</th><th>類型</th><th>項目</th><th>人員</th><th>狀態</th><th>金額</th><th></th></tr></thead><tbody>${displayedEntries.map(entryRow).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的帳務。</td></tr>'}</tbody></table></div></section>
       <section class="mobile-record-list">${displayedEntries.map(entryCard).join("") || '<div class="panel empty">目前沒有符合條件的帳務。</div>'}</section>
-    `}
-    <section class="cashbook-section-heading"><div><p class="eyebrow">PERSONAL SUMMARY</p><h3>個人收支與手上工程款</h3></div><small>已付款是人員實際支出；已收款只計入收取／保管的工程款。</small></section>
-    <section class="person-cash-grid">${personSummaryCards || '<div class="panel empty">請先到工程設定新增人員</div>'}</section>
-    ${cashbookTab === "all" ? `<section class="cashbook-section-heading transfer-heading"><div><p class="eyebrow">TRANSFERS</p><h3>人員間資金移轉</h3></div><div class="entry-action-buttons"><button class="secondary" data-action="export-cashflow">下載移轉 CSV</button><button class="primary" data-action="new-transfer">↔ 新增資金移轉</button></div></section><section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th>日期</th><th>轉出人</th><th>轉入人</th><th>狀態</th><th>金額</th><th>備註</th><th></th></tr></thead><tbody>${transferRows || '<tr><td colspan="7" class="empty">目前沒有資金移轉紀錄</td></tr>'}</tbody></table></div></section><section class="mobile-record-list">${transferCards || '<div class="panel empty">目前沒有資金移轉紀錄</div>'}</section>` : ""}`, "cashflow");
+    `}`, "cashflow");
   document.querySelectorAll<HTMLButtonElement>("[data-cashbook-tab]").forEach((button) => button.addEventListener("click", () => {
     cashbookTab = button.dataset.cashbookTab as CashbookTab;
     renderCashflow();
