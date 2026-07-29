@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculatePersonBalances, calculateTotals } from "./finance";
+import { calculatePersonBalances, calculatePersonCashbookSummaries, calculateTotals } from "./finance";
 import type { Category, FundTransfer, LedgerEntry, Person } from "./types";
 
 const categories: Category[] = [{ id: "c1", name: "材料", plannedAmount: 100000, color: "#6d5bd0", sortOrder: 1, items: [] }];
@@ -68,5 +68,22 @@ describe("calculatePersonBalances", () => {
     expect(balances.find((item) => item.person.id === "ming")?.balance).toBe(1000);
     expect(balances.find((item) => item.person.id === "danny")?.balance).toBe(0);
     expect(balances.find((item) => item.person.id === "mike")?.balance).toBe(0);
+  });
+});
+
+describe("calculatePersonCashbookSummaries", () => {
+  it("shows a person's expense under paid, not received", () => {
+    const mike: Person = { id: "mike", name: "Mike", role: "水電工", note: "", active: true, createdAt: "", updatedAt: "" };
+    const summary = calculatePersonCashbookSummaries([mike], [
+      { ...entry("expense", 8600), personId: "mike" },
+      { ...entry("income", 12000), personId: "mike" },
+      { ...entry("refund", 600), personId: "mike" },
+    ], []).at(0)!;
+
+    expect(summary.income).toBe(12000);
+    expect(summary.paid).toBe(8600);
+    expect(summary.refunded).toBe(600);
+    expect(summary.netExpense).toBe(8000);
+    expect(summary.cashOnHand).toBe(4000);
   });
 });

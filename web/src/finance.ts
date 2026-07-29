@@ -11,6 +11,21 @@ export interface Totals {
   budgetRemaining: number;
 }
 
+/**
+ * A person's view of the project account.  `income` means project money that
+ * person has received/keeps, while `paid` means they have actually paid an
+ * expense.  Keeping these fields separate prevents a personal out-of-pocket
+ * payment from being mistaken for money they collected.
+ */
+export interface PersonCashbookSummary {
+  person: Person;
+  income: number;
+  paid: number;
+  refunded: number;
+  netExpense: number;
+  cashOnHand: number;
+}
+
 export function calculateTotals(categories: Category[], entries: LedgerEntry[]): Totals {
   const planned = categories.reduce((sum, category) => sum + category.plannedAmount, 0);
   let received = 0;
@@ -76,4 +91,33 @@ export function calculatePersonBalances(
     }
     return { person, balance };
   }).sort((left, right) => right.balance - left.balance || left.person.name.localeCompare(right.person.name, "zh-Hant"));
+}
+
+export function calculatePersonCashbookSummaries(
+  people: Person[],
+  entries: LedgerEntry[],
+  transfers: FundTransfer[],
+): PersonCashbookSummary[] {
+  const balances = new Map(calculatePersonBalances(people, entries, transfers)
+    .map(({ person, balance }) => [person.id, balance]));
+
+  return people.map((person) => {
+    let income = 0;
+    let paid = 0;
+    let refunded = 0;
+    for (const entry of entries) {
+      if (entry.personId !== person.id || entry.status !== "posted") continue;
+      if (entry.kind === "income") income += entry.amount;
+      if (entry.kind === "expense") paid += entry.amount;
+      if (entry.kind === "refund") refunded += entry.amount;
+    }
+    return {
+      person,
+      income,
+      paid,
+      refunded,
+      netExpense: paid - refunded,
+      cashOnHand: balances.get(person.id) ?? 0,
+    };
+  }).sort((left, right) => left.person.name.localeCompare(right.person.name, "zh-Hant"));
 }

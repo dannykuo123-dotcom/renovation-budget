@@ -61,6 +61,42 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
 .person-balance-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 16px; padding: 16px 18px; border-radius: 13px; }
 .person-balance-summary small, .person-balance-summary strong { display: block; }.person-balance-summary strong { font-size: 20px; }
 .balance-history table { min-width: 580px; }.balance-mobile-value { display: block; margin-top: 18px; font-size: 22px; }
+.cashbook-intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+.cashbook-intro h3 { margin: 5px 0 7px; font-size: 22px; }
+.cashbook-intro p:last-child { max-width: 680px; margin: 0; color: #69756f; line-height: 1.6; }
+.cashbook-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; }
+.cashbook-overview article, .person-cash-card, .person-expense-card { border: 1px solid #e4e5df; border-radius: 16px; background: #fffefa; }
+.cashbook-overview article { display: grid; gap: 5px; padding: 19px; }
+.cashbook-overview small, .cashbook-overview span { color: #71807a; font-size: 12px; }
+.cashbook-overview strong { font-size: 24px; letter-spacing: -.04em; }
+.cashbook-overview .cashbook-balance { color: white; border-color: #1b7164; background: linear-gradient(135deg, #1a6156, #2d8877); }
+.cashbook-overview .cashbook-balance small, .cashbook-overview .cashbook-balance span { color: #d7eee6; }
+.cashbook-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 25px; }
+.cashbook-tabs button { min-height: 41px; padding: 8px 18px; border: 0; border-radius: 10px; color: #42524c; background: #edf0eb; font-weight: 900; }
+.cashbook-tabs button.active { color: #fff; background: #1d6f63; box-shadow: 0 6px 16px #1d6f6320; }
+.cashbook-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin: 26px 0 12px; }
+.cashbook-section-heading h3 { margin: 5px 0 0; font-size: 20px; }
+.cashbook-section-heading small { color: #748078; }
+.ledger-type { display: inline-block; min-width: 46px; padding: 4px 7px; border-radius: 99px; color: #53625c; background: #edf0eb; font-size: 11px; font-weight: 800; text-align: center; }
+.ledger-type.income { color: #08705c; background: #dff3eb; }.ledger-type.expense { color: #a34e45; background: #fae9e5; }.ledger-type.refund { color: #08705c; background: #d8f5e6; }
+.person-cash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.person-cash-card { padding: 18px; }
+.person-cash-head { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+.person-cash-head strong, .person-cash-head small { display: block; }
+.person-cash-head small { margin-top: 3px; color: #77847e; font-size: 12px; }
+.person-cash-head button { border: 0; padding: 4px; color: #1d6f63; background: transparent; font-size: 12px; font-weight: 800; }
+.person-cash-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 14px 0; }
+.person-cash-values small, .person-cash-values b { display: block; }.person-cash-values small { color: #7c8882; font-size: 10px; }.person-cash-values b { margin-top: 4px; font-size: 14px; }
+.person-cash-balance { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 10px; font-size: 12px; font-weight: 800; }
+.person-cash-balance strong { font-size: 18px; }.person-cash-balance.held { color: #08705c; background: #e1f2ec; }.person-cash-balance.advanced { color: #a24f44; background: #fae8e4; }
+.person-expense-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.person-expense-card { overflow: hidden; padding: 18px; }
+.person-expense-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; }.person-expense-head h3 { margin: 5px 0 0; font-size: 19px; }.person-expense-head > strong { color: #294a41; font-size: 14px; white-space: nowrap; }
+.person-expense-metrics { display: flex; gap: 14px; margin-top: 15px; color: #71807a; font-size: 12px; }.person-expense-metrics b { margin-left: 4px; color: #334c43; }.person-expense-metrics b.income { color: #1d806c; }
+.person-expense-list { display: grid; gap: 3px; margin-top: 13px; border-top: 1px solid #edf0eb; }
+.person-expense-line { display: grid; grid-template-columns: minmax(0, 1fr) auto 28px; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #edf0eb; }.person-expense-line:last-child { border-bottom: 0; }
+.person-expense-line small, .person-expense-line strong { display: block; }.person-expense-line small { color: #798680; font-size: 10px; }.person-expense-line strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; font-size: 13px; }
+.person-expense-line button { width: 28px; height: 28px; border: 0; border-radius: 7px; color: #315c52; background: #e8f0ec; font-weight: 900; }.person-expense-line.is-refund { background: #f3fbf7; }
 .checkbox-label { align-items: center; grid-auto-flow: column; justify-content: start; }.checkbox-label input { width: 18px; min-height: 18px; }
 .mobile-record-list { display: none; }
 .mobile-entry-filters { display: none; }
@@ -205,6 +241,14 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
   .modal { width: 100%; max-height: 94vh; padding: 22px 18px calc(22px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; }
   input, select, textarea { min-height: 45px; font-size: 16px; }
   .cashflow-section-heading { align-items: flex-start; flex-direction: column; gap: 8px; margin-top: 24px; }.cashflow-section-heading .secondary { width: 100%; }
+  .cashbook-intro { align-items: stretch; flex-direction: column; gap: 11px; margin-bottom: 13px; }
+  .cashbook-intro h3 { font-size: 19px; }.cashbook-intro p:last-child { font-size: 13px; line-height: 1.5; }
+  .cashbook-overview { grid-template-columns: 1fr 1fr; gap: 9px; }.cashbook-overview article { min-height: 104px; padding: 14px; }.cashbook-overview strong { font-size: 19px; }.cashbook-overview span { font-size: 10px; }
+  .cashbook-tabs { margin-top: 18px; }.cashbook-tabs button { flex: 1; min-height: 39px; padding: 7px 8px; }
+  .cashbook-section-heading { align-items: flex-start; flex-direction: column; gap: 6px; margin-top: 22px; }.cashbook-section-heading small { font-size: 12px; line-height: 1.45; }
+  .person-cash-grid, .person-expense-grid { grid-template-columns: 1fr; gap: 9px; }.person-cash-card, .person-expense-card { padding: 14px; }
+  .person-cash-values { padding: 11px 0; }.person-cash-values b { font-size: 13px; }.person-cash-balance { padding: 9px 10px; }.person-cash-balance strong { font-size: 16px; }
+  .person-expense-metrics { margin-top: 10px; }.person-expense-line { padding: 8px 0; }
   .settings-people-heading { align-items: stretch; margin-top: 26px; }.settings-people-heading .primary { width: 100%; }
   .person-balance-summary { align-items: flex-start; flex-direction: column; gap: 5px; }
   .projects-header { height: 70px; padding: 0 16px; }
