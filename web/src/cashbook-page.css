@@ -1,0 +1,504 @@
+.cashbook-create-toolbar {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.cashbook-create-toggle {
+  width: 54px;
+  height: 54px;
+  border: 0;
+  border-radius: 16px;
+  color: #fff;
+  background: #1d6f63;
+  box-shadow: 0 8px 20px #1d6f6326;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.cashbook-create-toggle:hover,
+.cashbook-create-toggle[aria-expanded="true"] {
+  background: #15594f;
+}
+
+.cashbook-create-menu {
+  position: absolute;
+  z-index: 4;
+  top: 62px;
+  right: 0;
+  display: grid;
+  min-width: 154px;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid #dfe3dc;
+  border-radius: 14px;
+  background: #fffefa;
+  box-shadow: 0 16px 38px #153a3324;
+}
+
+.cashbook-create-menu[hidden] {
+  display: none;
+}
+
+.cashbook-create-menu button {
+  justify-content: flex-start;
+  width: 100%;
+  box-shadow: none;
+}
+
+.cashbook-summary-strip.cashbook-summary-four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cashbook-summary-strip .summary-budget strong {
+  color: #24302e;
+}
+
+.cashbook-summary-strip .summary-income strong,
+.cashbook-summary-strip .summary-balance strong {
+  color: #08705c;
+}
+
+.cashbook-summary-strip .summary-expense strong {
+  color: #c35d45;
+}
+
+.cashbook-direct-filters {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid #e4e5df;
+  border-radius: 16px;
+  background: #fffefa;
+}
+
+.cashbook-filter-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.cashbook-filter-label {
+  padding-top: 9px;
+  color: #68756f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cashbook-filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cashbook-filter-chip {
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 13px;
+  color: #435049;
+  background: #edf0eb;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cashbook-filter-chip:hover {
+  color: #17695c;
+  background: #e0f0ea;
+}
+
+.cashbook-filter-chip.is-selected {
+  border-color: #1d6f63;
+  color: #fff;
+  background: #1d6f63;
+}
+
+.cashbook-people-options {
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.cashbook-person-filter {
+  display: grid;
+  min-width: 54px;
+  justify-items: center;
+  gap: 5px;
+  border: 0;
+  padding: 2px;
+  color: #68756f;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.cashbook-person-avatar,
+.cashbook-row-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d7ddd6;
+  border-radius: 50%;
+  color: #34443e;
+  background: #edf0eb;
+  font-weight: 800;
+}
+
+.cashbook-person-avatar {
+  width: 43px;
+  height: 43px;
+  font-size: 14px;
+}
+
+.cashbook-person-filter:hover .cashbook-person-avatar {
+  color: #17695c;
+  background: #e0f0ea;
+}
+
+.cashbook-person-filter.is-selected .cashbook-person-avatar {
+  border-color: #1d6f63;
+  color: #fff;
+  background: #1d6f63;
+}
+
+.cashbook-person-filter.is-selected {
+  color: #24302e;
+}
+
+.cashbook-list-toolbar {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 18px 0 7px;
+}
+
+.cashbook-list-toolbar small {
+  color: #748078;
+}
+
+.cashbook-search-input {
+  width: min(310px, 50vw);
+}
+
+.cashbook-search-toggle,
+.cashbook-date-sort {
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
+.cashbook-ledger-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.cashbook-ledger-table th:first-child {
+  width: 122px;
+}
+
+.cashbook-ledger-table th:nth-child(2) {
+  width: 92px;
+}
+
+.cashbook-ledger-table th:last-child {
+  width: 150px;
+  text-align: right;
+}
+
+.cashbook-ledger-row {
+  cursor: pointer;
+}
+
+.cashbook-ledger-row:hover td,
+.cashbook-ledger-row:focus-within td {
+  background: #edf5f1;
+}
+
+.cashbook-row-people {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cashbook-row-avatar {
+  width: 31px;
+  height: 31px;
+  font-size: 11px;
+}
+
+.cashbook-row-avatar::after {
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  display: none;
+  width: max-content;
+  max-width: 210px;
+  transform: translateX(-50%);
+  content: attr(data-person-tooltip);
+  padding: 6px 8px;
+  border-radius: 7px;
+  color: #fff;
+  background: #24302e;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.cashbook-row-avatar:hover::after,
+.cashbook-row-avatar:focus-visible::after {
+  display: block;
+}
+
+.cashbook-transfer-arrow {
+  color: #7c8882;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cashbook-item-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  font-weight: 800;
+}
+
+.cashbook-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cashbook-row-chevron {
+  flex: 0 0 auto;
+  color: #78847e;
+}
+
+.cashbook-pending-badge {
+  display: inline-block;
+  margin-left: 7px;
+  border-radius: 99px;
+  padding: 3px 7px;
+  color: #93620c;
+  background: #fff0ce;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.cashbook-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cashbook-amount-income {
+  color: #08705c;
+}
+
+.cashbook-amount-expense {
+  color: #c35d45;
+}
+
+.cashbook-amount-transfer {
+  color: #385d87;
+}
+
+.cashbook-detail-row td {
+  padding: 0;
+  background: #f7f8f5;
+}
+
+.cashbook-detail-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  padding: 17px 20px;
+}
+
+.cashbook-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 13px 18px;
+}
+
+.cashbook-detail-facts span {
+  display: grid;
+  gap: 3px;
+}
+
+.cashbook-detail-facts small {
+  color: #78847e;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.cashbook-detail-facts b {
+  color: #33423c;
+  font-size: 12px;
+}
+
+.cashbook-detail-actions {
+  display: flex;
+  align-self: end;
+  gap: 7px;
+}
+
+.cashbook-detail-actions button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 11px;
+  color: #315c52;
+  background: #e8f0ec;
+  font-weight: 800;
+}
+
+.cashbook-detail-actions .danger-text {
+  color: #9d5048;
+  background: #f6e9e6;
+}
+
+.cashbook-ledger-mobile {
+  display: none;
+}
+
+.cashbook-mobile-card {
+  overflow: hidden;
+  border: 1px solid #e4e5df;
+  border-radius: 13px;
+  background: #fffefa;
+}
+
+.cashbook-mobile-summary {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 72px 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  padding: 11px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.cashbook-mobile-summary:hover,
+.cashbook-mobile-summary:focus-visible {
+  background: #edf5f1;
+}
+
+.cashbook-mobile-date {
+  color: #64716b;
+  font-size: 12px;
+}
+
+.cashbook-mobile-item {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+
+.cashbook-mobile-detail {
+  border-top: 1px solid #e6e9e3;
+  background: #f7f8f5;
+}
+
+@media (max-width: 760px) {
+  .cashbook-summary-strip.cashbook-summary-four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cashbook-summary-strip article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .cashbook-summary-strip article:nth-child(-n+2) {
+    border-bottom: 1px solid #edf0eb;
+  }
+
+  .cashbook-filter-row {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .cashbook-filter-label {
+    padding-top: 0;
+  }
+
+  .cashbook-direct-filters {
+    gap: 12px;
+    padding: 13px;
+  }
+
+  .cashbook-list-toolbar {
+    flex-wrap: wrap;
+    margin-top: 15px;
+  }
+
+  .cashbook-list-toolbar small {
+    margin-right: auto;
+  }
+
+  .cashbook-search-input {
+    order: 2;
+    width: 100%;
+  }
+
+  .cashbook-ledger-desktop {
+    display: none;
+  }
+
+  .cashbook-ledger-mobile {
+    display: grid;
+    gap: 8px;
+  }
+
+  .cashbook-detail-panel {
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+
+  .cashbook-detail-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 11px;
+  }
+
+  .cashbook-detail-actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 390px) {
+  .cashbook-mobile-summary {
+    grid-template-columns: 66px 43px minmax(0, 1fr) auto;
+    gap: 5px;
+    padding: 9px 8px;
+  }
+
+  .cashbook-row-avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  .cashbook-transfer-arrow {
+    font-size: 10px;
+  }
+
+  .cashbook-amount {
+    font-size: 12px;
+  }
+}

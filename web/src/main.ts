@@ -23,6 +23,7 @@ import {
 } from "./api";
 import { readCachedFilters, writeCachedFilters } from "./filter-cache";
 import { buildCashbookLedger, calculateTotals, categorySpent, formatMoney, sortCashbookActivities, type CashbookActivity } from "./finance";
+import { renderCashbookPage, type CashbookFilters } from "./cashbook-page";
 import { parseRoute, projectRoute, projectsRoute, type ProjectView } from "./router";
 import type {
   Category,
@@ -119,9 +120,6 @@ function restoreViewFilters(projectId: string, view: ProjectView): void {
     if (["all", "income", "expense", "transfer"].includes(cached.type ?? "")) {
       cashbookTypeFilter = cached.type as CashbookTypeFilter;
     }
-    if (cached.status === "posted" || cached.status === "pending") {
-      cashbookStatusFilter = cached.status;
-    }
     if (cachedDirection === "asc" || cachedDirection === "desc") {
       cashbookDateSortDirection = cachedDirection;
     }
@@ -141,7 +139,6 @@ function persistViewFilters(view: ProjectView): void {
       categoryId: cashbookCategoryId,
       personId: cashbookPersonId,
       type: cashbookTypeFilter,
-      status: cashbookStatusFilter,
       sortDirection: cashbookDateSortDirection,
     });
   }
@@ -442,6 +439,31 @@ function transferStatusText(status: FundTransfer["status"]): string {
 }
 
 function renderCashflow() {
+  const filters: CashbookFilters = {
+    personId: cashbookPersonId,
+    type: cashbookTypeFilter,
+    categoryId: cashbookCategoryId,
+    query: cashbookQuery,
+    sortDirection: cashbookDateSortDirection,
+  };
+
+  renderCashbookPage({
+    payload: payload!,
+    filters,
+    dateLabel,
+    layout: (content) => layout(content, "cashflow"),
+    updateFilters: (patch) => {
+      if (patch.personId !== undefined) cashbookPersonId = patch.personId;
+      if (patch.type !== undefined) cashbookTypeFilter = patch.type;
+      if (patch.categoryId !== undefined) cashbookCategoryId = patch.categoryId;
+      if (patch.query !== undefined) cashbookQuery = patch.query;
+      if (patch.sortDirection !== undefined) cashbookDateSortDirection = patch.sortDirection;
+      persistViewFilters("cashflow");
+      renderCashflow();
+    },
+  });
+  if (payload) return;
+
   const peopleWithHistory = payload!.people
     .filter((person) => person.active ||
       payload!.entries.some((entry) => entry.personId === person.id) ||
@@ -547,7 +569,7 @@ function renderCashflow() {
   const balanceTitle = selectedPerson
     ? ledger.balance < 0 ? "個人代墊" : "手上工程款"
     : "工程款餘額";
-  const selectedPersonData = selectedPerson?.active ? ` data-person-id="${selectedPerson.id}"` : "";
+  const selectedPersonData = selectedPerson && selectedPerson.active ? ` data-person-id="${selectedPerson.id}"` : "";
   const categoryOptions = `<option value="">全部分類</option>${payload!.categories.map((category) =>
     `<option value="${category.id}" ${cashbookCategoryId === category.id ? "selected" : ""}>${esc(category.name)}</option>`,
   ).join("")}`;
