@@ -8,8 +8,17 @@ describe("project hash routes", () => {
   });
 
   it("keeps a project and its selected page across refreshes", () => {
-    const hash = projectRoute("job/一號", "expenses");
-    expect(parseRoute(hash)).toEqual({ kind: "project", projectId: "job/一號", view: "expenses" });
+    const hash = projectRoute("job/一號", "cashflow");
+    expect(parseRoute(hash)).toEqual({ kind: "project", projectId: "job/一號", view: "cashflow" });
+  });
+
+  it.each(["expenses", "funding"] as const)("redirects the legacy %s page to the cashbook", (legacyView) => {
+    expect(parseRoute(`#/projects/abc/${legacyView}`)).toEqual({
+      kind: "project",
+      projectId: "abc",
+      view: "cashflow",
+      legacyView,
+    });
   });
 
   it("falls back to the project dashboard for an unknown page", () => {
@@ -20,7 +29,3 @@ describe("project hash routes", () => {
     });
   });
 });
-
-  it("supports the cashflow page", () => {
-    expect(parseRoute(projectRoute("abc", "cashflow"))).toEqual({ kind: "project", projectId: "abc", view: "cashflow" });
-  });

@@ -38,20 +38,15 @@ import type {
 
 let projects: ProjectSummary[] = [];
 let payload: DashboardPayload | null = null;
-let query = "";
-let filterCategory = "";
-let filterStatus = "";
-let mobileFiltersOpen = false;
+let cashbookQuery = "";
+let cashbookCategoryId = "";
+let cashbookAdvancedFiltersOpen = false;
 let loading = false;
 type SortDirection = "asc" | "desc";
 type BudgetSortKey = "sortOrder" | "name" | "planned" | "spent" | "remaining" | "percentage";
-type EntrySortKey = "occurredOn" | "description" | "category" | "person" | "paymentMethod" | "status" | "amount";
 const budgetSortKeys: BudgetSortKey[] = ["sortOrder", "name", "planned", "spent", "remaining", "percentage"];
-const entrySortKeys: EntrySortKey[] = ["occurredOn", "description", "category", "person", "paymentMethod", "status", "amount"];
 let budgetSortKey: BudgetSortKey = "sortOrder";
 let budgetSortDirection: SortDirection = "asc";
-let entrySortKey: EntrySortKey = "occurredOn";
-let entrySortDirection: SortDirection = "desc";
 type CashbookTypeFilter = "all" | "income" | "expense" | "transfer";
 type CashbookStatusFilter = "posted" | "pending";
 let cashbookPersonId = "";
@@ -91,14 +86,11 @@ function personName(id: string | null): string {
 }
 
 function resetViewFilters(): void {
-  query = "";
-  filterCategory = "";
-  filterStatus = "";
-  mobileFiltersOpen = false;
+  cashbookQuery = "";
+  cashbookCategoryId = "";
+  cashbookAdvancedFiltersOpen = false;
   budgetSortKey = "sortOrder";
   budgetSortDirection = "asc";
-  entrySortKey = "occurredOn";
-  entrySortDirection = "desc";
   cashbookPersonId = "";
   cashbookTypeFilter = "all";
   cashbookStatusFilter = "posted";
@@ -116,20 +108,11 @@ function restoreViewFilters(projectId: string, view: ProjectView): void {
     return;
   }
 
-  if (view === "expenses" || view === "funding") {
-    query = cached.query ?? "";
-    if (cached.categoryId && payload!.categories.some((category) => category.id === cached.categoryId)) {
-      filterCategory = cached.categoryId;
-    }
-    if (["", "expense-posted", "expense-pending"].includes(cached.status ?? "")) {
-      filterStatus = cached.status ?? "";
-    }
-    if (entrySortKeys.includes(cached.sortKey as EntrySortKey)) entrySortKey = cached.sortKey as EntrySortKey;
-    if (cachedDirection === "asc" || cachedDirection === "desc") entrySortDirection = cachedDirection;
-    return;
-  }
-
   if (view === "cashflow") {
+    cashbookQuery = cached.query ?? "";
+    if (cached.categoryId && payload!.categories.some((category) => category.id === cached.categoryId)) {
+      cashbookCategoryId = cached.categoryId;
+    }
     if (cached.personId && payload!.people.some((person) => person.id === cached.personId)) {
       cashbookPersonId = cached.personId;
     }
@@ -152,16 +135,10 @@ function persistViewFilters(view: ProjectView): void {
       sortKey: budgetSortKey,
       sortDirection: budgetSortDirection,
     });
-  } else if (view === "expenses" || view === "funding") {
-    writeCachedFilters(localStorage, projectId, view, {
-      query,
-      categoryId: filterCategory,
-      status: filterStatus,
-      sortKey: entrySortKey,
-      sortDirection: entrySortDirection,
-    });
   } else if (view === "cashflow") {
     writeCachedFilters(localStorage, projectId, view, {
+      query: cashbookQuery,
+      categoryId: cashbookCategoryId,
       personId: cashbookPersonId,
       type: cashbookTypeFilter,
       status: cashbookStatusFilter,
@@ -194,10 +171,6 @@ function entryStatusText(entry: LedgerEntry): string {
   if (entry.status === "void") return "已作廢";
   if (entry.kind === "income") return "已入帳";
   return entry.status === "posted" ? "已付款" : "待付款";
-}
-
-function entryStatusClass(entry: LedgerEntry): string {
-  return entry.status;
 }
 
 function sortIndicator(key: string, currentKey: string, direction: SortDirection): string {
@@ -260,6 +233,9 @@ async function refresh() {
   loading = true;
   showLoading();
   const route = parseRoute(location.hash);
+  if (route.kind === "project" && route.legacyView) {
+    history.replaceState(null, "", projectRoute(route.projectId, "cashflow"));
+  }
   try {
     if (route.kind === "projects") {
       payload = null;
@@ -354,8 +330,6 @@ function layout(content: string, view: ProjectView) {
   const title: Record<ProjectView, string> = {
     dashboard: "工程資金總覽",
     budget: "預算分類",
-    expenses: "支出紀錄",
-    funding: "資金入帳",
     cashflow: "工程帳本",
     settings: "工程設定",
   };
@@ -369,9 +343,7 @@ function layout(content: string, view: ProjectView) {
         <nav>
           ${navLink("dashboard", "⌂", "總覽", view)}
           ${navLink("budget", "▦", "預算分類", view)}
-          ${navLink("expenses", "↗", "支出紀錄", view)}
           ${navLink("cashflow", "&#8644;", "工程帳本", view)}
-          ${navLink("funding", "＋", "資金入帳", view)}
           ${navLink("settings", "⚙", "工程設定", view)}
         </nav>
         <div class="sidebar-foot"><span class="live-dot"></span><small>${isDemoMode ? "本機資料模式" : "雲端資料已連線"}</small></div>
@@ -390,8 +362,6 @@ function layout(content: string, view: ProjectView) {
         ${navLink("dashboard", "⌂", "總覽", view)}
         ${navLink("budget", "▦", "預算", view)}
         ${navLink("cashflow", "&#8644;", "帳本", view)}
-        ${navLink("expenses", "↗", "支出", view)}
-        ${navLink("funding", "＋", "入帳", view)}
         ${navLink("settings", "•••", "更多", view)}
       </nav>
     </div>`;
@@ -422,7 +392,7 @@ function renderDashboard() {
         }).join("") || '<p class="empty">尚未建立預算分類</p>'}</div>
       </article>
       <article class="panel recent">
-        <div class="panel-head"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>最新紀錄</h3></div><a class="text-button" href="${projectRoute(currentProjectId(), "expenses")}">查看全部</a></div>
+        <div class="panel-head"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>最新紀錄</h3></div><a class="text-button" href="${projectRoute(currentProjectId(), "cashflow")}">查看全部</a></div>
         <div class="activity-list">${recent.map((entry) => `
           <div class="activity"><div class="entry-icon ${entry.kind}">${entry.kind === "income" ? "↓" : "↑"}</div><div><strong>${esc(entry.description)}</strong><small>${dateLabel(entry.occurredOn)} · ${esc(entryStatusText(entry))}</small></div><b class="${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</b></div>`).join("") || '<p class="empty">尚無帳務紀錄</p>'}</div>
       </article>
@@ -467,107 +437,6 @@ function renderBudget() {
   }));
 }
 
-function entryFilters(entries: LedgerEntry[]) {
-  return entries.filter((entry) =>
-    (!query || [entry.description, personName(entry.personId), entry.note].join(" ").toLowerCase().includes(query.toLowerCase())) &&
-    (!filterCategory || entry.categoryId === filterCategory) &&
-    (!filterStatus ||
-      (filterStatus === "expense-posted" && entry.kind === "expense" && entry.status === "posted") ||
-      (filterStatus === "expense-pending" && entry.kind === "expense" && entry.status === "pending")));
-}
-
-function mobileFilterSummary(): string {
-  const labels = [
-    filterCategory ? categoryName(filterCategory) : "",
-    ({
-      "expense-posted": "已付款",
-      "expense-pending": "待付款",
-    } as Record<string, string>)[filterStatus] ?? "",
-  ].filter(Boolean);
-  return labels.length ? `篩選 · ${labels.join("、")}` : "篩選";
-}
-
-function entryRow(entry: LedgerEntry, isFunding: boolean) {
-  return `<tr><td>${dateLabel(entry.occurredOn)}</td><td><strong>${esc(entry.description)}</strong>${entry.attachments.length ? `<small class="attachment-count">⌁ ${entry.attachments.length} 張憑證</small>` : ""}</td><td>${esc(isFunding ? personName(entry.personId) : categoryName(entry.categoryId))}</td><td>${esc((isFunding ? entry.paymentMethod : personName(entry.personId)) || "—")}</td><td><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span></td><td class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</td><td class="row-actions"><button data-action="edit-entry" data-id="${entry.id}">編輯</button><button data-action="delete-entry" data-id="${entry.id}">刪除</button></td></tr>`;
-}
-
-function entryCard(entry: LedgerEntry, isFunding: boolean) {
-  const context = isFunding
-    ? `資金持有人：${personName(entry.personId)}`
-    : `${categoryName(entry.categoryId)} · 付款人：${personName(entry.personId)}`;
-  return `<article class="mobile-record-card compact-entry-card">
-    <div class="mobile-record-head"><div><small>${dateLabel(entry.occurredOn)}</small><strong>${esc(entry.description)}</strong></div><b class="amount ${entryAmountClass(entry)}">${entryAmountSign(entry)}${formatMoney(entry.amount)}</b></div>
-    <div class="compact-entry-footer"><div class="compact-entry-meta"><span title="${esc(context)}">${esc(context)}</span><span class="status ${entryStatusClass(entry)}">${entryStatusText(entry)}</span></div><div class="compact-entry-actions"><button data-action="edit-entry" data-id="${entry.id}" aria-label="編輯 ${esc(entry.description)}" title="編輯">✎</button><button class="danger-text" data-action="delete-entry" data-id="${entry.id}" aria-label="刪除 ${esc(entry.description)}" title="刪除">×</button></div></div>
-  </article>`;
-}
-
-function renderEntries(view: "expenses" | "funding") {
-  const isFunding = view === "funding";
-  const entries = entryFilters(payload!.entries.filter((entry) => isFunding ? entry.kind === "income" : entry.kind !== "income"))
-    .sort((left, right) => {
-      const value = (entry: LedgerEntry): string | number => {
-        if (entrySortKey === "occurredOn") return entry.occurredOn;
-        if (entrySortKey === "description") return entry.description;
-        if (entrySortKey === "category") return isFunding ? personName(entry.personId) : categoryName(entry.categoryId);
-        if (entrySortKey === "person") return personName(entry.personId);
-        if (entrySortKey === "paymentMethod") return entry.paymentMethod;
-        if (entrySortKey === "status") return entryStatusText(entry);
-        return entry.amount;
-      };
-      const compare = compareSortValue(value(left), value(right));
-      return entrySortDirection === "asc" ? compare : -compare;
-    });
-  const categoryOptions = `<option value="">全部分類</option>${payload!.categories.map((category) => `<option value="${category.id}" ${filterCategory === category.id ? "selected" : ""}>${esc(category.name)}</option>`).join("")}`;
-  const statusOptions = `<option value="">全部狀態</option><option value="expense-posted" ${filterStatus === "expense-posted" ? "selected" : ""}>已付款</option><option value="expense-pending" ${filterStatus === "expense-pending" ? "selected" : ""}>待付款</option>`;
-  layout(`
-    <section class="page-actions"><p>${isFunding ? "記錄資金入帳並指定目前持有人，金額會增加他的手上餘額。" : "管理已付款、待付款與工程憑證；若有退款，直接刪除原支出紀錄即可。"}</p><div class="entry-action-buttons"><button class="primary" data-action="new-entry" data-kind="${isFunding ? "income" : "expense"}">＋ 新增${isFunding ? "入帳" : "支出"}</button></div></section>
-    <section class="filters panel desktop-entry-filters"><label>搜尋<input id="search" placeholder="品項、人員或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<label>分類<select id="category-filter">${categoryOptions}</select></label><label>狀態<select id="status-filter">${statusOptions}</select></label>`}</section>
-    <section class="mobile-entry-filters"> <div class="mobile-filter-bar"><label><span class="sr-only">搜尋</span><input id="mobile-search" placeholder="搜尋品項、人員或備註" value="${esc(query)}" /></label>${isFunding ? "" : `<button class="secondary mobile-filter-toggle" id="mobile-filter-toggle" aria-expanded="${mobileFiltersOpen}">${mobileFilterSummary()} ${mobileFiltersOpen ? "⌃" : "⌄"}</button>`}</div>${!isFunding ? `<div class="mobile-filter-options" ${mobileFiltersOpen ? "" : "hidden"}><label>分類<select id="mobile-category-filter">${categoryOptions}</select></label><label>狀態<select id="mobile-status-filter">${statusOptions}</select></label></div>` : ""}</section>
-    <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="entry-table"><thead><tr><th><button class="sort-button" data-sort-entry="occurredOn">日期 ${sortIndicator("occurredOn", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="description">品項 ${sortIndicator("description", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="category">${isFunding ? "資金持有人" : "分類"} ${sortIndicator("category", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="${isFunding ? "paymentMethod" : "person"}">${isFunding ? "付款方式" : "付款人／代墊人"} ${sortIndicator(isFunding ? "paymentMethod" : "person", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="status">狀態 ${sortIndicator("status", entrySortKey, entrySortDirection)}</button></th><th><button class="sort-button" data-sort-entry="amount">金額 ${sortIndicator("amount", entrySortKey, entrySortDirection)}</button></th><th></th></tr></thead><tbody>${entries.map((entry) => entryRow(entry, isFunding)).join("") || '<tr><td colspan="7" class="empty">目前沒有符合條件的紀錄。</td></tr>'}</tbody></table></div></section>
-    <section class="mobile-record-list">${entries.map((entry) => entryCard(entry, isFunding)).join("") || '<div class="panel empty">目前沒有符合條件的紀錄。</div>'}</section>`, view);
-  document.querySelector<HTMLInputElement>("#search")?.addEventListener("change", (event) => {
-    query = (event.target as HTMLInputElement).value;
-    persistViewFilters(view);
-    renderProjectPage(view);
-  });
-  document.querySelector<HTMLInputElement>("#mobile-search")?.addEventListener("change", (event) => {
-    query = (event.target as HTMLInputElement).value;
-    persistViewFilters(view);
-    renderProjectPage(view);
-  });
-  document.querySelector<HTMLSelectElement>("#category-filter")?.addEventListener("change", (event) => {
-    filterCategory = (event.target as HTMLSelectElement).value;
-    persistViewFilters(view);
-    renderProjectPage(view);
-  });
-  document.querySelector<HTMLSelectElement>("#mobile-category-filter")?.addEventListener("change", (event) => {
-    filterCategory = (event.target as HTMLSelectElement).value;
-    persistViewFilters(view);
-    renderProjectPage(view);
-  });
-  document.querySelector<HTMLSelectElement>("#status-filter")?.addEventListener("change", (event) => {
-    filterStatus = (event.target as HTMLSelectElement).value;
-    persistViewFilters(view);
-    renderProjectPage(view);
-  });
-  document.querySelector<HTMLSelectElement>("#mobile-status-filter")?.addEventListener("change", (event) => {
-    filterStatus = (event.target as HTMLSelectElement).value;
-    persistViewFilters(view);
-    renderProjectPage(view);
-  });
-  document.querySelector<HTMLButtonElement>("#mobile-filter-toggle")?.addEventListener("click", () => {
-    mobileFiltersOpen = !mobileFiltersOpen;
-    renderEntries(view);
-  });
-  document.querySelectorAll<HTMLElement>("[data-sort-entry]").forEach((button) => button.addEventListener("click", () => {
-    const key = button.dataset.sortEntry as EntrySortKey;
-    entrySortDirection = key === entrySortKey && entrySortDirection === "asc" ? "desc" : "asc";
-    entrySortKey = key;
-    persistViewFilters(view);
-    renderEntries(view);
-  }));
-}
-
 function transferStatusText(status: FundTransfer["status"]): string {
   return status === "posted" ? "已完成" : status === "pending" ? "待處理" : "已作廢";
 }
@@ -581,15 +450,6 @@ function renderCashflow() {
   if (cashbookPersonId && !peopleWithHistory.some((person) => person.id === cashbookPersonId)) cashbookPersonId = "";
   const selectedPerson = peopleWithHistory.find((person) => person.id === cashbookPersonId);
   const ledger = buildCashbookLedger(payload!.entries, payload!.transfers, selectedPerson?.id ?? null);
-  const typeMatches = (activity: CashbookActivity) =>
-    cashbookTypeFilter === "all" ||
-    activity.kind === cashbookTypeFilter ||
-    (cashbookTypeFilter === "transfer" && activity.kind.startsWith("transfer"));
-  const activities = sortCashbookActivities(
-    ledger.activities.filter((activity) =>
-      activity.status === cashbookStatusFilter && typeMatches(activity)),
-    cashbookDateSortDirection,
-  );
   const unassignedCount = payload!.entries
     .filter((entry) => entry.status === "posted" && !entry.personId).length;
   const personOptions = `<option value="">全部人員</option>${peopleWithHistory.map((person) =>
@@ -615,15 +475,39 @@ function renderCashflow() {
     return `${personName(activity.fromPersonId)} → ${personName(activity.toPersonId)}`;
   };
   const activityDetails = (activity: CashbookActivity) => {
+    const entry = activity.source === "entry"
+      ? payload!.entries.find((candidate) => candidate.id === activity.id)
+      : undefined;
     const details = activity.source === "entry"
       ? [
-          activity.kind === "expense" ? categoryName(payload!.entries.find((entry) => entry.id === activity.id)?.categoryId ?? null) : "",
+          activity.kind === "expense" ? categoryName(entry?.categoryId ?? null) : "",
           activity.paymentMethod,
           activity.note,
+          entry?.attachments.length ? `${entry.attachments.length} 張憑證` : "",
         ]
       : [activity.paymentMethod, activity.note || "人員間資金移轉"];
     return details.filter(Boolean).join(" · ") || "未填寫詳細資料";
   };
+  const typeMatches = (activity: CashbookActivity) =>
+    cashbookTypeFilter === "all" ||
+    activity.kind === cashbookTypeFilter ||
+    (cashbookTypeFilter === "transfer" && activity.kind.startsWith("transfer"));
+  const normalizedQuery = cashbookQuery.trim().toLocaleLowerCase("zh-Hant");
+  const activities = sortCashbookActivities(
+    ledger.activities.filter((activity) => {
+      const entry = activity.source === "entry"
+        ? payload!.entries.find((candidate) => candidate.id === activity.id)
+        : undefined;
+      const searchText = [activityTitle(activity), relatedPeople(activity), activityDetails(activity)]
+        .join(" ")
+        .toLocaleLowerCase("zh-Hant");
+      return activity.status === cashbookStatusFilter &&
+        typeMatches(activity) &&
+        (!cashbookCategoryId || entry?.kind === "expense" && entry.categoryId === cashbookCategoryId) &&
+        (!normalizedQuery || searchText.includes(normalizedQuery));
+    }),
+    cashbookDateSortDirection,
+  );
   const activityStatusText = (activity: CashbookActivity) =>
     activity.source === "entry"
       ? entryStatusText(payload!.entries.find((entry) => entry.id === activity.id)!)
@@ -664,14 +548,32 @@ function renderCashflow() {
     ? ledger.balance < 0 ? "個人代墊" : "手上工程款"
     : "工程款餘額";
   const selectedPersonData = selectedPerson?.active ? ` data-person-id="${selectedPerson.id}"` : "";
+  const categoryOptions = `<option value="">全部分類</option>${payload!.categories.map((category) =>
+    `<option value="${category.id}" ${cashbookCategoryId === category.id ? "selected" : ""}>${esc(category.name)}</option>`,
+  ).join("")}`;
+  const advancedFilterLabels = [
+    cashbookQuery ? `搜尋「${cashbookQuery}」` : "",
+    cashbookCategoryId ? categoryName(cashbookCategoryId) : "",
+    cashbookStatusFilter === "pending" ? "待處理" : "",
+  ].filter(Boolean);
+  const advancedFilterLabel = advancedFilterLabels.length
+    ? `更多篩選 · ${advancedFilterLabels.join("、")}`
+    : "更多篩選";
   layout(`
-    <section class="cashbook-intro"><div><p class="eyebrow">PROJECT CASHBOOK</p><h3>${selectedPerson ? `${esc(selectedPerson.name)}的工程存摺` : "全部人員工程存摺"}</h3><p>${selectedPerson ? "收入、付款、轉入與轉出會依日期排列，逐筆顯示手上工程款變化。" : "查看整個工程的收入與支出；人員間移轉會列出，但不影響工程總餘額。"}</p></div><div class="entry-action-buttons cashbook-actions"><button class="secondary cashbook-action income-action" data-action="new-entry" data-kind="income"${selectedPersonData}><span aria-hidden="true">＋</span><span class="action-long-label">新增收入</span><span class="action-short-label">收入</span></button><button class="secondary cashbook-action transfer-action" data-action="new-transfer"><span aria-hidden="true">↔</span><span class="action-long-label">新增移轉</span><span class="action-short-label">移轉</span></button><button class="primary cashbook-action expense-action" data-action="new-entry" data-kind="expense"${selectedPersonData}><span aria-hidden="true">＋</span><span class="action-long-label">新增支出</span><span class="action-short-label">支出</span></button></div></section>
-    <section class="cashbook-overview passbook-summary"><article><small>${selectedPerson ? "累計存入" : "工程總收入"}</small><strong class="income">${formatMoney(ledger.deposited)}</strong><span>${selectedPerson ? "收入與已完成轉入" : "所有已入帳工程款"}</span></article><article><small>${selectedPerson ? "累計支出" : "工程總支出"}</small><strong>${formatMoney(ledger.withdrawn)}</strong><span>${selectedPerson ? "付款與已完成轉出" : "所有已付款支出"}</span></article><article class="cashbook-balance ${selectedPerson && ledger.balance < 0 ? "advanced" : ""}"><small>${balanceTitle}</small><strong>${formatMoney(balanceAmount)}</strong><span>${selectedPerson ? "已完成交易的目前結果" : "總收入 − 總支出"}</span></article></section>
+    <section class="cashbook-toolbar"><div class="entry-action-buttons cashbook-actions"><button class="secondary cashbook-action income-action" data-action="new-entry" data-kind="income"${selectedPersonData}><span aria-hidden="true">＋</span><span class="action-long-label">新增收入</span><span class="action-short-label">收入</span></button><button class="secondary cashbook-action transfer-action" data-action="new-transfer"><span aria-hidden="true">↔</span><span class="action-long-label">新增移轉</span><span class="action-short-label">移轉</span></button><button class="primary cashbook-action expense-action" data-action="new-entry" data-kind="expense"${selectedPersonData}><span aria-hidden="true">＋</span><span class="action-long-label">新增支出</span><span class="action-short-label">支出</span></button></div></section>
+    <section class="cashbook-summary-strip"><article><small>${selectedPerson ? "累計存入" : "工程總收入"}</small><strong class="income">${formatMoney(ledger.deposited)}</strong></article><article><small>${selectedPerson ? "累計支出" : "工程總支出"}</small><strong>${formatMoney(ledger.withdrawn)}</strong></article><article class="cashbook-balance ${selectedPerson && ledger.balance < 0 ? "advanced" : ""}"><small>${balanceTitle}</small><strong>${formatMoney(balanceAmount)}</strong></article></section>
     ${unassignedCount ? `<div class="cashflow-warning">有 ${unassignedCount} 筆已完成帳務尚未指定人員；全部人員模式仍會顯示，個人存摺不會列入。</div>` : ""}
-    <section class="panel passbook-filters">
-      <label>查看帳本<select id="cashbook-person">${personOptions}</select></label>
-      <label>交易類型<select id="cashbook-type"><option value="all" ${cashbookTypeFilter === "all" ? "selected" : ""}>全部類型</option><option value="income" ${cashbookTypeFilter === "income" ? "selected" : ""}>收入</option><option value="expense" ${cashbookTypeFilter === "expense" ? "selected" : ""}>支出</option><option value="transfer" ${cashbookTypeFilter === "transfer" ? "selected" : ""}>資金移轉</option></select></label>
-      <label>入帳狀態<select id="cashbook-status"><option value="posted" ${cashbookStatusFilter === "posted" ? "selected" : ""}>已完成</option><option value="pending" ${cashbookStatusFilter === "pending" ? "selected" : ""}>待處理</option></select></label>
+    <section class="panel cashbook-filter-panel">
+      <div class="cashbook-core-filters">
+        <label>查看帳本<select id="cashbook-person">${personOptions}</select></label>
+        <label>交易類型<select id="cashbook-type"><option value="all" ${cashbookTypeFilter === "all" ? "selected" : ""}>全部類型</option><option value="income" ${cashbookTypeFilter === "income" ? "selected" : ""}>收入</option><option value="expense" ${cashbookTypeFilter === "expense" ? "selected" : ""}>支出</option><option value="transfer" ${cashbookTypeFilter === "transfer" ? "selected" : ""}>資金移轉</option></select></label>
+        <button class="secondary cashbook-more-toggle ${advancedFilterLabels.length ? "is-active" : ""}" id="cashbook-more-filters" aria-expanded="${cashbookAdvancedFiltersOpen}">${esc(advancedFilterLabel)} ${cashbookAdvancedFiltersOpen ? "⌃" : "⌄"}</button>
+      </div>
+      <div class="cashbook-advanced-filters" ${cashbookAdvancedFiltersOpen ? "" : "hidden"}>
+        <label>搜尋<input id="cashbook-search" type="search" placeholder="品項、人員或備註" value="${esc(cashbookQuery)}" /></label>
+        <label>預算分類<select id="cashbook-category">${categoryOptions}</select></label>
+        <label>入帳狀態<select id="cashbook-status"><option value="posted" ${cashbookStatusFilter === "posted" ? "selected" : ""}>已完成</option><option value="pending" ${cashbookStatusFilter === "pending" ? "selected" : ""}>待處理</option></select></label>
+      </div>
     </section>
     <section class="cashbook-section-heading"><div><p class="eyebrow">PASSBOOK</p><h3>收支明細</h3></div><div class="cashbook-heading-tools"><small>${activities.length} 筆符合條件的交易</small><button class="secondary mobile-cashbook-sort" data-sort-cashbook-date aria-label="切換日期排序">日期 ${cashbookDateSortDirection === "desc" ? "新 → 舊 ↓" : "舊 → 新 ↑"}</button></div></section>
     <section class="panel table-panel desktop-table"><div class="table-wrap"><table class="passbook-table"><thead><tr><th><button class="sort-button" data-sort-cashbook-date>日期 ${cashbookDateSortDirection === "asc" ? "↑" : "↓"}</button></th><th>摘要</th><th>相關人員</th><th>存入</th><th>支出</th><th>當時餘額</th><th>狀態</th><th></th></tr></thead><tbody>${activities.map(activityRow).join("") || '<tr><td colspan="8" class="empty">目前沒有符合條件的交易。</td></tr>'}</tbody></table></div></section>
@@ -683,6 +585,20 @@ function renderCashflow() {
   });
   document.querySelector<HTMLSelectElement>("#cashbook-type")?.addEventListener("change", (event) => {
     cashbookTypeFilter = (event.target as HTMLSelectElement).value as CashbookTypeFilter;
+    persistViewFilters("cashflow");
+    renderCashflow();
+  });
+  document.querySelector<HTMLButtonElement>("#cashbook-more-filters")?.addEventListener("click", () => {
+    cashbookAdvancedFiltersOpen = !cashbookAdvancedFiltersOpen;
+    renderCashflow();
+  });
+  document.querySelector<HTMLInputElement>("#cashbook-search")?.addEventListener("change", (event) => {
+    cashbookQuery = (event.target as HTMLInputElement).value.trim();
+    persistViewFilters("cashflow");
+    renderCashflow();
+  });
+  document.querySelector<HTMLSelectElement>("#cashbook-category")?.addEventListener("change", (event) => {
+    cashbookCategoryId = (event.target as HTMLSelectElement).value;
     persistViewFilters("cashflow");
     renderCashflow();
   });
@@ -718,7 +634,6 @@ function renderProjectPage(view: ProjectView) {
   if (view === "dashboard") renderDashboard();
   else if (view === "budget") renderBudget();
   else if (view === "cashflow") renderCashflow();
-  else if (view === "expenses" || view === "funding") renderEntries(view);
   else renderSettings();
 }
 
@@ -1043,7 +958,7 @@ function bindCommon() {
 }
 
 window.addEventListener("hashchange", () => {
-  mobileFiltersOpen = false;
+  cashbookAdvancedFiltersOpen = false;
   refresh();
 });
 

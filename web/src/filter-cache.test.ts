@@ -16,14 +16,14 @@ describe("filter cache", () => {
   it("scopes cached filters by project and view", () => {
     const { storage } = createStorage();
     writeCachedFilters(storage, "project-a", "cashflow", { personId: "person-a", type: "income" });
-    writeCachedFilters(storage, "project-a", "expenses", { status: "expense-posted" });
+    writeCachedFilters(storage, "project-a", "budget", { sortKey: "spent" });
 
     expect(readCachedFilters(storage, "project-a", "cashflow")).toEqual({
       personId: "person-a",
       type: "income",
     });
-    expect(readCachedFilters(storage, "project-a", "expenses")).toEqual({
-      status: "expense-posted",
+    expect(readCachedFilters(storage, "project-a", "budget")).toEqual({
+      sortKey: "spent",
     });
     expect(readCachedFilters(storage, "project-b", "cashflow")).toEqual({});
   });
