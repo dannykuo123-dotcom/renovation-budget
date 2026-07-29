@@ -87,12 +87,12 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
 .passbook-table td:nth-child(4), .passbook-table td:nth-child(5), .passbook-table td:nth-child(6) { white-space: nowrap; }
 .passbook-title { display: inline; margin-left: 8px; }
 .passbook-detail { display: block; max-width: 330px; overflow: hidden; margin-top: 5px; color: #748078; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.passbook-running-balance { display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 8px; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 800; }
+.passbook-running-balance { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 800; }
 .passbook-running-balance b { font: inherit; }
 .passbook-running-balance .balance-label { font-size: 10px; opacity: .75; }
-.passbook-running-balance.is-positive { color: #08705c; background: #dff3eb; }
-.passbook-running-balance.is-negative { color: #a34e45; background: #fae9e5; }
-.passbook-running-balance.is-pending { color: #8b6a2d; background: #f8efd9; }
+.passbook-running-balance.is-positive { color: #08705c; }
+.passbook-running-balance.is-negative { color: #a34e45; }
+.passbook-running-balance.is-pending { color: #8b6a2d; }
 .passbook-card .passbook-detail { max-width: none; margin: 10px 0 2px; line-height: 1.45; white-space: normal; }
 .passbook-card-meta { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
 .passbook-card .passbook-card-meta small { margin: 0; }
