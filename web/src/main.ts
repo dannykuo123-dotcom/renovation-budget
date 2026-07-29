@@ -21,6 +21,7 @@ import {
   updateProject,
   uploadAttachments,
 } from "./api";
+import { readCachedFilters, writeCachedFilters } from "./filter-cache";
 import { buildCashbookLedger, calculateTotals, categorySpent, formatMoney, sortCashbookActivities, type CashbookActivity } from "./finance";
 import { parseRoute, projectRoute, projectsRoute, type ProjectView } from "./router";
 import type {
@@ -45,6 +46,8 @@ let loading = false;
 type SortDirection = "asc" | "desc";
 type BudgetSortKey = "sortOrder" | "name" | "planned" | "spent" | "remaining" | "percentage";
 type EntrySortKey = "occurredOn" | "description" | "category" | "person" | "paymentMethod" | "status" | "amount";
+const budgetSortKeys: BudgetSortKey[] = ["sortOrder", "name", "planned", "spent", "remaining", "percentage"];
+const entrySortKeys: EntrySortKey[] = ["occurredOn", "description", "category", "person", "paymentMethod", "status", "amount"];
 let budgetSortKey: BudgetSortKey = "sortOrder";
 let budgetSortDirection: SortDirection = "asc";
 let entrySortKey: EntrySortKey = "occurredOn";
@@ -85,6 +88,86 @@ function personById(id: string | null): Person | undefined {
 function personName(id: string | null): string {
   const person = personById(id);
   return person ? `${person.name}${person.role ? `（${person.role}）` : ""}` : "未指定";
+}
+
+function resetViewFilters(): void {
+  query = "";
+  filterCategory = "";
+  filterStatus = "";
+  mobileFiltersOpen = false;
+  budgetSortKey = "sortOrder";
+  budgetSortDirection = "asc";
+  entrySortKey = "occurredOn";
+  entrySortDirection = "desc";
+  cashbookPersonId = "";
+  cashbookTypeFilter = "all";
+  cashbookStatusFilter = "posted";
+  cashbookDateSortDirection = "desc";
+}
+
+function restoreViewFilters(projectId: string, view: ProjectView): void {
+  resetViewFilters();
+  const cached = readCachedFilters(localStorage, projectId, view);
+  const cachedDirection = cached.sortDirection;
+
+  if (view === "budget") {
+    if (budgetSortKeys.includes(cached.sortKey as BudgetSortKey)) budgetSortKey = cached.sortKey as BudgetSortKey;
+    if (cachedDirection === "asc" || cachedDirection === "desc") budgetSortDirection = cachedDirection;
+    return;
+  }
+
+  if (view === "expenses" || view === "funding") {
+    query = cached.query ?? "";
+    if (cached.categoryId && payload!.categories.some((category) => category.id === cached.categoryId)) {
+      filterCategory = cached.categoryId;
+    }
+    if (["", "expense-posted", "expense-pending"].includes(cached.status ?? "")) {
+      filterStatus = cached.status ?? "";
+    }
+    if (entrySortKeys.includes(cached.sortKey as EntrySortKey)) entrySortKey = cached.sortKey as EntrySortKey;
+    if (cachedDirection === "asc" || cachedDirection === "desc") entrySortDirection = cachedDirection;
+    return;
+  }
+
+  if (view === "cashflow") {
+    if (cached.personId && payload!.people.some((person) => person.id === cached.personId)) {
+      cashbookPersonId = cached.personId;
+    }
+    if (["all", "income", "expense", "transfer"].includes(cached.type ?? "")) {
+      cashbookTypeFilter = cached.type as CashbookTypeFilter;
+    }
+    if (cached.status === "posted" || cached.status === "pending") {
+      cashbookStatusFilter = cached.status;
+    }
+    if (cachedDirection === "asc" || cachedDirection === "desc") {
+      cashbookDateSortDirection = cachedDirection;
+    }
+  }
+}
+
+function persistViewFilters(view: ProjectView): void {
+  const projectId = currentProjectId();
+  if (view === "budget") {
+    writeCachedFilters(localStorage, projectId, view, {
+      sortKey: budgetSortKey,
+      sortDirection: budgetSortDirection,
+    });
+  } else if (view === "expenses" || view === "funding") {
+    writeCachedFilters(localStorage, projectId, view, {
+      query,
+      categoryId: filterCategory,
+      status: filterStatus,
+      sortKey: entrySortKey,
+      sortDirection: entrySortDirection,
+    });
+  } else if (view === "cashflow") {
+    writeCachedFilters(localStorage, projectId, view, {
+      personId: cashbookPersonId,
+      type: cashbookTypeFilter,
+      status: cashbookStatusFilter,
+      sortDirection: cashbookDateSortDirection,
+    });
+  }
 }
 
 function personShortName(id: string | null): string {
@@ -184,6 +267,7 @@ async function refresh() {
       renderProjectList();
     } else {
       payload = await loadDashboard(route.projectId);
+      restoreViewFilters(route.projectId, route.view);
       renderProjectPage(route.view);
     }
   } catch (reason) {
@@ -378,6 +462,7 @@ function renderBudget() {
     const key = button.dataset.sortBudget as BudgetSortKey;
     budgetSortDirection = key === budgetSortKey && budgetSortDirection === "asc" ? "desc" : "asc";
     budgetSortKey = key;
+    persistViewFilters("budget");
     renderBudget();
   }));
 }
@@ -442,26 +527,32 @@ function renderEntries(view: "expenses" | "funding") {
     <section class="mobile-record-list">${entries.map((entry) => entryCard(entry, isFunding)).join("") || '<div class="panel empty">目前沒有符合條件的紀錄。</div>'}</section>`, view);
   document.querySelector<HTMLInputElement>("#search")?.addEventListener("change", (event) => {
     query = (event.target as HTMLInputElement).value;
+    persistViewFilters(view);
     renderProjectPage(view);
   });
   document.querySelector<HTMLInputElement>("#mobile-search")?.addEventListener("change", (event) => {
     query = (event.target as HTMLInputElement).value;
+    persistViewFilters(view);
     renderProjectPage(view);
   });
   document.querySelector<HTMLSelectElement>("#category-filter")?.addEventListener("change", (event) => {
     filterCategory = (event.target as HTMLSelectElement).value;
+    persistViewFilters(view);
     renderProjectPage(view);
   });
   document.querySelector<HTMLSelectElement>("#mobile-category-filter")?.addEventListener("change", (event) => {
     filterCategory = (event.target as HTMLSelectElement).value;
+    persistViewFilters(view);
     renderProjectPage(view);
   });
   document.querySelector<HTMLSelectElement>("#status-filter")?.addEventListener("change", (event) => {
     filterStatus = (event.target as HTMLSelectElement).value;
+    persistViewFilters(view);
     renderProjectPage(view);
   });
   document.querySelector<HTMLSelectElement>("#mobile-status-filter")?.addEventListener("change", (event) => {
     filterStatus = (event.target as HTMLSelectElement).value;
+    persistViewFilters(view);
     renderProjectPage(view);
   });
   document.querySelector<HTMLButtonElement>("#mobile-filter-toggle")?.addEventListener("click", () => {
@@ -472,6 +563,7 @@ function renderEntries(view: "expenses" | "funding") {
     const key = button.dataset.sortEntry as EntrySortKey;
     entrySortDirection = key === entrySortKey && entrySortDirection === "asc" ? "desc" : "asc";
     entrySortKey = key;
+    persistViewFilters(view);
     renderEntries(view);
   }));
 }
@@ -586,19 +678,23 @@ function renderCashflow() {
     <section class="mobile-record-list">${activities.map(activityCard).join("") || '<div class="panel empty">目前沒有符合條件的交易。</div>'}</section>`, "cashflow");
   document.querySelector<HTMLSelectElement>("#cashbook-person")?.addEventListener("change", (event) => {
     cashbookPersonId = (event.target as HTMLSelectElement).value;
+    persistViewFilters("cashflow");
     renderCashflow();
   });
   document.querySelector<HTMLSelectElement>("#cashbook-type")?.addEventListener("change", (event) => {
     cashbookTypeFilter = (event.target as HTMLSelectElement).value as CashbookTypeFilter;
+    persistViewFilters("cashflow");
     renderCashflow();
   });
   document.querySelector<HTMLSelectElement>("#cashbook-status")?.addEventListener("change", (event) => {
     cashbookStatusFilter = (event.target as HTMLSelectElement).value as CashbookStatusFilter;
+    persistViewFilters("cashflow");
     renderCashflow();
   });
   document.querySelectorAll<HTMLElement>("[data-sort-cashbook-date]").forEach((button) =>
     button.addEventListener("click", () => {
       cashbookDateSortDirection = cashbookDateSortDirection === "desc" ? "asc" : "desc";
+      persistViewFilters("cashflow");
       renderCashflow();
     }));
 }
@@ -947,13 +1043,7 @@ function bindCommon() {
 }
 
 window.addEventListener("hashchange", () => {
-  query = "";
-  filterCategory = "";
-  filterStatus = "";
-  cashbookPersonId = "";
-  cashbookTypeFilter = "all";
-  cashbookStatusFilter = "posted";
-  cashbookDateSortDirection = "desc";
+  mobileFiltersOpen = false;
   refresh();
 });
 
