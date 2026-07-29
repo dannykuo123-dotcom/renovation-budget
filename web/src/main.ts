@@ -87,6 +87,10 @@ function personName(id: string | null): string {
   return person ? `${person.name}${person.role ? `（${person.role}）` : ""}` : "未指定";
 }
 
+function personShortName(id: string | null): string {
+  return personById(id)?.name ?? "未指定";
+}
+
 function activePersonOptions(selectedId: string | null, includeInactive = false): string {
   const people = payload!.people.filter((person) => person.active || person.id === selectedId || includeInactive);
   return `<option value="">請選擇人員</option>${people.map((person) =>
@@ -508,9 +512,9 @@ function renderCashflow() {
   })[activity.kind];
   const activityTitle = (activity: CashbookActivity) => {
     if (activity.source === "entry") return activity.description;
-    if (activity.kind === "transfer-in") return `收到 ${personName(activity.fromPersonId)} 移轉`;
-    if (activity.kind === "transfer-out") return `轉給 ${personName(activity.toPersonId)}`;
-    return `${personName(activity.fromPersonId)} → ${personName(activity.toPersonId)}`;
+    if (activity.kind === "transfer-in") return personShortName(activity.fromPersonId);
+    if (activity.kind === "transfer-out") return personShortName(activity.toPersonId);
+    return `${personShortName(activity.fromPersonId)} → ${personShortName(activity.toPersonId)}`;
   };
   const relatedPeople = (activity: CashbookActivity) => {
     if (activity.source === "entry") return personName(activity.personId);
@@ -550,7 +554,7 @@ function renderCashflow() {
     const amountClass = activity.delta > 0 ? "income" : activity.delta < 0 ? "negative" : "";
     const amountPrefix = activity.delta > 0 ? "+" : activity.delta < 0 ? "−" : "↔ ";
     return `<article class="mobile-record-card passbook-card">
-      <div class="mobile-record-head"><div><small>${dateLabel(activity.occurredOn)} · ${activityTypeLabel(activity)}</small><strong>${esc(activityTitle(activity))}</strong></div><b class="amount ${amountClass}">${amountPrefix}${formatMoney(activity.amount)}</b></div>
+      <div class="mobile-record-head"><div><div class="passbook-card-meta"><small>${dateLabel(activity.occurredOn)}</small><span class="ledger-type ${activity.kind}">${activityTypeLabel(activity)}</span></div><strong>${esc(activityTitle(activity))}</strong></div><b class="amount ${amountClass}">${amountPrefix}${formatMoney(activity.amount)}</b></div>
       <p class="passbook-detail">${esc(relatedPeople(activity))} · ${esc(activityDetails(activity))}</p>
       <div class="compact-entry-footer"><div class="compact-entry-meta"><span class="status ${activity.status}">${activityStatusText(activity)}</span><span>${activity.runningBalance === null ? "未入帳" : `餘額 ${formatMoney(activity.runningBalance)}`}</span></div><div class="compact-entry-actions">${activityActions(activity, true)}</div></div>
     </article>`;

@@ -82,6 +82,9 @@ nav { display: grid; gap: 7px; }.nav-item { display: flex; align-items: center; 
 .passbook-detail { display: block; max-width: 330px; overflow: hidden; margin-top: 5px; color: #748078; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .pending-balance { color: #8b6a2d; font-size: 12px; font-weight: 800; }
 .passbook-card .passbook-detail { max-width: none; margin: 10px 0 2px; line-height: 1.45; white-space: normal; }
+.passbook-card-meta { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+.passbook-card .passbook-card-meta small { margin: 0; }
+.passbook-card-meta .ledger-type { min-width: 42px; padding: 3px 8px; }
 .checkbox-label { align-items: center; grid-auto-flow: column; justify-content: start; }.checkbox-label input { width: 18px; min-height: 18px; }
 .mobile-record-list { display: none; }
 .mobile-entry-filters { display: none; }
