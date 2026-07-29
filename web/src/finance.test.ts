@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCashbookLedger, calculateTotals } from "./finance";
+import { buildCashbookLedger, calculateTotals, sortCashbookActivities } from "./finance";
 import type { Category, FundTransfer, LedgerEntry } from "./types";
 
 const categories: Category[] = [{ id: "c1", name: "材料", plannedAmount: 100000, color: "#6d5bd0", sortOrder: 1, items: [] }];
@@ -97,6 +97,14 @@ describe("buildCashbookLedger", () => {
     }))).toEqual([
       { id: "late", runningBalance: 90 },
       { id: "early", runningBalance: 100 },
+    ]);
+
+    expect(sortCashbookActivities(ledger.activities, "asc").map((activity) => ({
+      id: activity.id,
+      runningBalance: activity.runningBalance,
+    }))).toEqual([
+      { id: "early", runningBalance: 100 },
+      { id: "late", runningBalance: 90 },
     ]);
   });
 });

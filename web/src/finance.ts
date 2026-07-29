@@ -37,6 +37,18 @@ export interface CashbookLedger {
   activities: CashbookActivity[];
 }
 
+export function sortCashbookActivities(
+  activities: CashbookActivity[],
+  direction: "asc" | "desc",
+): CashbookActivity[] {
+  const multiplier = direction === "asc" ? 1 : -1;
+  return [...activities].sort((left, right) => multiplier * (
+    left.occurredOn.localeCompare(right.occurredOn) ||
+    left.createdAt.localeCompare(right.createdAt) ||
+    left.id.localeCompare(right.id)
+  ));
+}
+
 export function buildCashbookLedger(
   entries: LedgerEntry[],
   transfers: FundTransfer[],
@@ -116,7 +128,7 @@ export function buildCashbookLedger(
       return { ...activity, runningBalance: balance };
     });
 
-  return { deposited, withdrawn, balance, activities: chronological.reverse() };
+  return { deposited, withdrawn, balance, activities: sortCashbookActivities(chronological, "desc") };
 }
 
 export function calculateTotals(categories: Category[], entries: LedgerEntry[]): Totals {
