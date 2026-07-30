@@ -36,4 +36,14 @@ describe("filter cache", () => {
     values.set(filterCacheKey("project-a", "cashflow"), "{invalid");
     expect(readCachedFilters(storage, "project-a", "cashflow")).toEqual({});
   });
+
+  it("keeps the cashbook view mode per project", () => {
+    const { storage } = createStorage();
+
+    writeCachedFilters(storage, "project-a", "cashflow", { viewMode: "split" });
+
+    expect(readCachedFilters(storage, "project-a", "cashflow")).toEqual({
+      viewMode: "split",
+    });
+  });
 });

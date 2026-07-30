@@ -24,7 +24,9 @@
 .ph.ph-calendar-blank::before { content: "\e10a"; }
 .ph.ph-caret-down::before { content: "\e136"; }
 .ph.ph-chart-donut::before { content: "\eaa6"; }
+.ph.ph-columns::before { content: "\e546"; }
 .ph.ph-house::before { content: "\e2c2"; }
+.ph.ph-list::before { content: "\e2f0"; }
 .ph.ph-magnifying-glass::before { content: "\e30c"; }
 .ph.ph-notebook::before { content: "\e34e"; }
 .ph.ph-sign-out::before { content: "\e42a"; }

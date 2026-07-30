@@ -26,6 +26,10 @@ import {
 import { readCachedFilters, writeCachedFilters } from "./filter-cache";
 import { buildCashbookLedger, calculateTotals, categorySpent, formatMoney, sortCashbookActivities, type CashbookActivity } from "./finance";
 import { renderCashbookPage, type CashbookFilters } from "./cashbook-page";
+import {
+  normalizeCashbookViewMode,
+  type CashbookViewMode,
+} from "./cashbook-layout";
 import { parseRoute, projectRoute, projectsRoute, type ProjectView } from "./router";
 import { personInitial } from "./cashbook-view";
 import { defaultTransferPeople, entryStatusChoices, entryStatusValue, paymentMethodChoices, transferStatusChoices } from "./ledger-form-view";
@@ -58,7 +62,9 @@ let cashbookPersonId = "";
 let cashbookTypeFilter: CashbookTypeFilter = "all";
 let cashbookStatusFilter: CashbookStatusFilter = "posted";
 let cashbookDateSortDirection: SortDirection = "desc";
+let cashbookViewMode: CashbookViewMode = "list";
 const app = document.querySelector<HTMLDivElement>("#app")!;
+const brandLogoUrl = `${import.meta.env.BASE_URL}rainbow-interior-logo.svg`;
 
 const esc = (value: string) =>
   value.replace(/[&<>'"]/g, (character) =>
@@ -99,6 +105,7 @@ function resetViewFilters(): void {
   cashbookTypeFilter = "all";
   cashbookStatusFilter = "posted";
   cashbookDateSortDirection = "desc";
+  cashbookViewMode = "list";
 }
 
 function restoreViewFilters(projectId: string, view: ProjectView): void {
@@ -126,6 +133,7 @@ function restoreViewFilters(projectId: string, view: ProjectView): void {
     if (cachedDirection === "asc" || cachedDirection === "desc") {
       cashbookDateSortDirection = cachedDirection;
     }
+    cashbookViewMode = normalizeCashbookViewMode(cached.viewMode);
   }
 }
 
@@ -143,6 +151,7 @@ function persistViewFilters(view: ProjectView): void {
       personId: cashbookPersonId,
       type: cashbookTypeFilter,
       sortDirection: cashbookDateSortDirection,
+      viewMode: cashbookViewMode,
     });
   }
 }
@@ -320,19 +329,12 @@ function navLink(view: ProjectView, icon: string, label: string, current: Projec
 
 function layout(content: string, view: ProjectView) {
   const project = payload!.project;
-  const title: Record<ProjectView, string> = {
-    dashboard: "工程資金總覽",
-    budget: "預算分類",
-    cashflow: "工程帳本",
-    settings: "工程設定",
-  };
   app.innerHTML = `
     <div class="shell topbar-shell">
       <header class="glass-topbar">
         <div class="brand-zone">
           <a class="brand-lockup" href="${projectsRoute()}" aria-label="彩虹室內設計，返回所有工程">
-            <img src="/rainbow-interior-logo.svg" alt="" width="42" height="42" />
-            <span><strong>彩虹室內設計</strong><small>RAINBOW INTERIOR DESIGN</small></span>
+            <img src="${brandLogoUrl}" alt="彩虹室內設計 RAINBOW INTERIOR DESIGN" width="244" height="56" />
           </a>
           <a class="project-chip" href="${projectsRoute()}" title="切換工程">
             <span>${esc(project.name)}</span><i class="ph ph-caret-down" aria-hidden="true"></i>
@@ -351,7 +353,7 @@ function layout(content: string, view: ProjectView) {
         </div>
       </header>
       <main class="main">
-        <header class="page-heading"><h2>${title[view]}</h2></header>
+        ${view === "cashflow" ? "" : `<header class="page-heading"><h2>${view === "dashboard" ? "工程資金總覽" : view === "budget" ? "預算分類" : "工程設定"}</h2></header>`}
         ${content}
       </main>
     </div>`;
@@ -443,6 +445,7 @@ function renderCashflow() {
   renderCashbookPage({
     payload: payload!,
     filters,
+    viewMode: cashbookViewMode,
     dateLabel,
     layout: (content) => layout(content, "cashflow"),
     updateFilters: (patch) => {
@@ -451,6 +454,11 @@ function renderCashflow() {
       if (patch.categoryId !== undefined) cashbookCategoryId = patch.categoryId;
       if (patch.query !== undefined) cashbookQuery = patch.query;
       if (patch.sortDirection !== undefined) cashbookDateSortDirection = patch.sortDirection;
+      persistViewFilters("cashflow");
+      renderCashflow();
+    },
+    updateViewMode: (mode) => {
+      cashbookViewMode = mode;
       persistViewFilters("cashflow");
       renderCashflow();
     },

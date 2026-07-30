@@ -1,71 +1,75 @@
-# #1069 Single-layer Minimal Ledger Design QA
+# #1069 帳本極簡版設計 QA
 
-## Evidence
+## 比對目標
 
 - Source visual truth:
-  - `C:\Users\Danny\AppData\Local\Temp\codex-clipboard-4adb84aa-fbb1-444a-ab58-a67bb24c9485.png`
-  - `C:\Users\Danny\AppData\Local\Temp\codex-clipboard-2cdbed54-40ff-4fc6-8afa-210955eebc01.png`
-  - `C:\Users\Danny\AppData\Local\Temp\codex-clipboard-ff71e54b-d2c9-4458-a5ae-7ddf1168bd02.png`
-  - `C:\Users\Danny\AppData\Local\Temp\codex-clipboard-08116cf4-10f1-4f99-ba67-039e757d0bb3.png`
-- Implementation screenshots:
-  - `C:\Users\Danny\Desktop\renovation-budget\qa-cashbook-desktop.jpg`
-  - `C:\Users\Danny\Desktop\renovation-budget\qa-cashbook-mobile.jpg`
-  - `C:\Users\Danny\Desktop\renovation-budget\qa-expense-form.jpg`
-  - `C:\Users\Danny\Desktop\renovation-budget\qa-transfer-form.jpg`
-- Combined comparison inputs:
-  - `C:\Users\Danny\Desktop\renovation-budget\qa-cashbook-comparison.png`
-  - `C:\Users\Danny\Desktop\renovation-budget\qa-form-comparison.png`
-- Desktop ledger: 1280 × 900 CSS px, device scale factor 1, 1280 × 900 implementation pixels.
-- Mobile ledger: 320 × 700 CSS px, device scale factor 1, 320 × 953 full-page implementation pixels.
-- Expense form: 720 × 950 CSS px, device scale factor 1, 720 × 950 implementation pixels.
-- Source form: 658 × 704 pixels at 96 dpi. It was normalized to 720 px width for the combined comparison.
-- Source filter crop: 377 × 203 pixels at 96 dpi. It was normalized to 1200 px width; the matching implementation region was cropped from the 1280 px desktop capture and normalized to the same width.
-- State: populated expense ledger, direct filters, search open, accordion open, and fresh transfer form with two active people.
+  - `C:/Users/Danny/AppData/Local/Temp/codex-clipboard-3c92f878-5699-4ae9-80e7-3d8a133af8f2.png`（清單密度與四欄資訊）
+  - `C:/Users/Danny/AppData/Local/Temp/codex-clipboard-f00fc5dc-f726-4d91-a572-4d43bec52d09.png`（篩選控制）
+  - 本任務最新文字規格（人員僅顯示頭像、三組篩選同列、摘要五段、左右模式與全寬轉移）
+- Rendered implementation:
+  - `design-qa-artifacts/ledger-desktop-list.png`
+  - `design-qa-artifacts/ledger-desktop-split-fixed.png`
+  - `design-qa-artifacts/ledger-mobile-320-split.png`
+  - `design-qa-artifacts/ledger-mobile-320-list.png`
+- Combined comparison evidence:
+  - `design-qa-artifacts/compare-desktop-source-implementation.png`
+  - `design-qa-artifacts/compare-filter-source-implementation.png`
 
-## Full-view comparison evidence
+## 正規化資訊
 
-The implementation preserves the source product’s cream, green, gray, rounded-card language while removing the sidebar and replacing it with one glass top bar. The account summary, people-first filters, combined type/category row, icon toolbar, and four-column ledger are visibly denser than the source captures without hiding the core workflow.
+- 桌機來源清單：1293 × 392 px，96 dpi；比對圖等比例縮至 855 px 寬。
+- 桌機實作：CSS viewport 855 × 830，截圖 855 × 830 px，device scale factor 1。
+- 手機實作：CSS viewport 320 × 720；分欄截圖 320 × 720 px，清單 full-page 截圖 320 × 830 px，device scale factor 1。
+- 篩選來源：672 × 125 px；focused comparison 依共同寬度等比例置入，未以密度差異判斷字體或間距。
+- 來源截圖是舊版局部畫面，不含新的摘要與左右模式；此部分以使用者最新文字規格作為視覺真值。
 
-The form comparison shows the intended simplification directly: the readonly record-type field and explanatory paragraphs are gone; small-choice dropdowns are replaced by direct chips; the date control has a single branded calendar affordance; upload is a full drop zone; and the single primary action is named “儲存”.
+## 狀態與互動
 
-## Focused region comparison evidence
-
-- Filter and ledger region: `qa-cashbook-comparison.png` keeps labels, avatars, selected states, sort/search icons, columns, and amount color legible at a common width.
-- Expense form: `qa-form-comparison.png` keeps all source and implementation controls legible at a common width.
-- Transfer post-fix evidence: `qa-transfer-form.jpg` visibly shows Danny selected for 轉出 and 浩浩 selected for 轉入.
+- Desktop list：全部人員／全部類型／全部分類，日期新到舊。
+- Desktop split：收入左、支出右、轉移下方全寬。
+- Mobile split：收入／支出頁籤，轉移固定在下方；實測切換至支出後內容更新。
+- Mobile list：Danny 人員篩選、清單模式、單筆風琴展開。
+- 已測試：新增選單開啟、`Esc` 關閉與焦點回復、模式切換、模式在篩選重繪後保留、人員篩選、頁籤、單筆風琴、tooltip/aria 姓名、摘要與篩選內部橫向滑動。
+- Console error/warning：0。
 
 ## Required fidelity surfaces
 
-- Fonts and typography: the existing application font stack is retained. The new brand English line uses small tracked capitals; page headings, chip labels, numeric totals, and compact toolbar text have distinct weights without excess descriptive copy.
-- Spacing and layout rhythm: top navigation, summaries, filter deck, toolbar, and table share the same content grid. Desktop uses two compact filter rows; 320 px uses wrapped controls and avatar compression without clipped persistent controls.
-- Colors and visual tokens: the existing cream background and deep green active state remain. Active navigation uses a dark surface with white text; expense values remain orange-red and balances green.
-- Image quality and asset fidelity: Phosphor’s official icon font supplies interface icons. The requested animated gradient brand mark is an external SVG asset, not an inline or CSS-drawn substitute, and remains sharp at desktop and mobile sizes.
-- Copy and content: redundant form explanations, upload format copy, project eyebrow, and “收支明細” are absent. Buttons consistently use “儲存”; filters remain “人員／類型／分類”; the transfer workflow remains clearly named “轉移”.
+- Fonts and typography：沿用現有介面字體與字重；摘要數字桌機為 26px、tabular numerals；品牌 SVG 具中文與英文標準字及完整 fallback。
+- Spacing and layout rhythm：移除帳本標題後，摘要成為首個內容區；五段摘要、單列篩選與工具列間距一致。桌機左右兩欄等寬，轉移跨兩欄。
+- Colors and visual tokens：選取狀態維持深綠底白字；收入綠、支出橘紅、轉移藍；摘要、分組標頭與既有色票一致。
+- Image quality and asset fidelity：品牌使用獨立向量檔並以 `BASE_URL` 載入；自然尺寸 300 × 56，可在 GitHub Pages 子路徑正常解析。動畫與 `prefers-reduced-motion` 均已定義。此為使用者明確要求的新動畫漸層 SVG，來源畫面原圖本身是破圖，並無可保留的既有品牌原稿。
+- Copy and content：帳本標題已移除；人員篩選不顯示姓名；「工程款轉移」使用「款項交接」；金額使用 `＋`、`−`、`↔` 且無 `$`。
 
 ## Findings
 
-- No actionable P0, P1, or P2 mismatch remains.
-- P3: at very short browser heights, the upload zone requires one short modal scroll; the sticky cancel/save bar remains visible and the upload control is not obscured.
-
-## Interaction and responsive checks
-
-- `＋` exposes 支出／收入／轉移 and can be closed by outside click or `Esc`.
-- Direct people/category/payment/status controls update their pressed state and submitted hidden value.
-- Income status remains implicit; expense exposes only 已付款／待付款; transfer exposes only 已完成／待處理.
-- A fresh transfer defaults to two different people and still rejects identical participants.
-- Date input opens through the native picker surface with one visible calendar icon.
-- Upload drop zone supports click selection, drag-over styling, file count, and the existing file validation.
-- Search applies on `Enter`; sort and filter controls rerender correctly.
-- Accordion exposes details and edit/delete actions; only one record stays expanded.
-- 320 px full-page capture shows no clipped controls or application-level horizontal scrolling.
-- Browser console: no errors or warnings.
+- 無剩餘 P0／P1／P2。
+- P3：320px 頂部導覽為內部橫向捲動，最窄畫面不會同時露出四個導覽圖示；這是保留完整品牌標準字及既有頂部操作按鈕後的可接受取捨，整頁不會水平溢出。
 
 ## Comparison history
 
-1. Initial expense-form capture found the sticky top navigation rendering above the modal and a duplicate native calendar icon.
-2. Raised the modal layer above navigation and made the native date indicator invisible while preserving its click target. Post-fix evidence is `qa-expense-form.jpg` and `qa-form-comparison.png`.
-3. Initial transfer capture selected the same first person for both directions.
-4. Added a tested default-participant helper and repeated the browser pass. `qa-transfer-form.jpg` shows two different selected people.
-5. Final desktop, form, and 320 px comparisons found no remaining P0/P1/P2 issue. Browser logs remained clean.
+### Iteration 1
+
+- [P2] Desktop split 的轉移列人員欄與日期欄重疊。
+  - Evidence：人員內容 `scrollWidth 84px`，欄寬僅 `72px`，量測 `overlap: true`；截圖為 `ledger-desktop-split.png`。
+  - Root cause：收入／支出單頭像與轉移雙頭像共用同一個 72px grid track。
+  - Fix：桌機人員欄調整為 90px，390px 以下調整為 80px。
+  - Post-fix evidence：人員欄寬與 scrollWidth 皆為 90px，日期左緣晚於人員欄右緣，`overlap: false`；截圖為 `ledger-desktop-split-fixed.png`。
+
+### Iteration 2
+
+- 重新比對完整桌機、單列篩選、320px split/list 與風琴狀態。
+- 未發現可操作的 P0／P1／P2 差異。
+
+## Implementation checklist
+
+- [x] 移除帳本標題。
+- [x] 完整動畫品牌 SVG 與 GitHub Pages 相對路徑。
+- [x] 摘要四數字與 `＋` 同列。
+- [x] 人員／類型／分類單列與內部捲動。
+- [x] 人員僅顯示首字頭像並保留完整無障礙名稱。
+- [x] 清單／左右模式切換與專案快取。
+- [x] 手機收入／支出頁籤與全寬轉移。
+- [x] 320px 無整頁水平溢出。
+- [x] 新增選單、搜尋、排序、風琴與鍵盤互動。
 
 final result: passed

@@ -1,29 +1,77 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-  <title id="title">彩虹室內設計</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 64" role="img" aria-labelledby="brand-title brand-desc">
+  <title id="brand-title">彩虹室內設計</title>
+  <desc id="brand-desc">彩虹室內設計，RAINBOW INTERIOR DESIGN</desc>
   <defs>
-    <linearGradient id="rainbow" x1="4" y1="4" x2="60" y2="60" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#8fe6cb">
-        <animate attributeName="stop-color" values="#8fe6cb;#a7b8ff;#ffd19b;#8fe6cb" dur="7s" repeatCount="indefinite"/>
+    <linearGradient id="rainbow-flow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF7C67">
+        <animate attributeName="stop-color" dur="8s" repeatCount="indefinite" values="#FF7C67;#F0B55D;#FF7C67"/>
       </stop>
-      <stop offset=".5" stop-color="#6d8df7">
-        <animate attributeName="stop-color" values="#6d8df7;#ed8db5;#6fc9bd;#6d8df7" dur="7s" repeatCount="indefinite"/>
+      <stop offset=".38" stop-color="#E9B85E">
+        <animate attributeName="stop-color" dur="8s" repeatCount="indefinite" values="#E9B85E;#70BFA4;#E9B85E"/>
       </stop>
-      <stop offset="1" stop-color="#f2a56f">
-        <animate attributeName="stop-color" values="#f2a56f;#7bd8bf;#b397f4;#f2a56f" dur="7s" repeatCount="indefinite"/>
+      <stop offset=".68" stop-color="#4DAA91">
+        <animate attributeName="stop-color" dur="8s" repeatCount="indefinite" values="#4DAA91;#628CC2;#4DAA91"/>
       </stop>
+      <stop offset="1" stop-color="#697FC0">
+        <animate attributeName="stop-color" dur="8s" repeatCount="indefinite" values="#697FC0;#AE78B4;#697FC0"/>
+      </stop>
+      <animateTransform attributeName="gradientTransform" type="rotate" from="0 .5 .5" to="360 .5 .5" dur="14s" repeatCount="indefinite"/>
     </linearGradient>
-    <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#153d35" flood-opacity=".2"/>
+    <linearGradient id="word-flow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#173D35"/>
+      <stop offset=".46" stop-color="#1F7668"/>
+      <stop offset="1" stop-color="#314D72"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#173D35" flood-opacity=".16"/>
     </filter>
+    <clipPath id="mark-clip">
+      <rect x="2" y="2" width="60" height="60" rx="18"/>
+    </clipPath>
+    <style>
+      .zh {
+        font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: 1.4px;
+      }
+      .en {
+        font-family: "Avenir Next", "Montserrat", "Segoe UI", sans-serif;
+        font-size: 8.5px;
+        font-weight: 700;
+        letter-spacing: 3.35px;
+      }
+      .shine { animation: logo-shine 5.5s ease-in-out infinite; }
+      @keyframes logo-shine {
+        0%, 18% { transform: translateX(-34px); opacity: 0; }
+        35%, 52% { opacity: .72; }
+        72%, 100% { transform: translateX(92px); opacity: 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .shine { animation: none; opacity: 0; }
+        animate, animateTransform { display: none; }
+      }
+    </style>
   </defs>
-  <rect x="5" y="5" width="54" height="54" rx="18" fill="url(#rainbow)" filter="url(#soft-shadow)"/>
-  <path d="M18 41V24.5C18 21.5 20.5 19 23.5 19H33c7.2 0 12 4 12 10.2 0 4.2-2.3 7.4-6.2 9l7.2 6.8h-8.2l-6.3-6.1H25V45h-7Zm7-15v7h7.4c3.5 0 5.4-1.2 5.4-3.6 0-2.3-1.9-3.4-5.4-3.4H25Z" fill="#123b34"/>
-  <path d="M20 16h24" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".75">
-    <animate attributeName="opacity" values=".45;.9;.45" dur="3.5s" repeatCount="indefinite"/>
-  </path>
-  <style>
-    @media (prefers-reduced-motion: reduce) {
-      animate { display: none; }
-    }
-  </style>
+
+  <g filter="url(#soft-shadow)">
+    <rect x="2" y="2" width="60" height="60" rx="18" fill="#FFFDF8"/>
+    <g clip-path="url(#mark-clip)">
+      <path d="M-6 55C6 25 25 10 53 9c13 0 22 5 31 14" fill="none" stroke="url(#rainbow-flow)" stroke-width="8" stroke-linecap="round"/>
+      <path d="M1 62C12 35 29 22 54 21c10 0 19 3 28 10" fill="none" stroke="url(#rainbow-flow)" stroke-width="6" stroke-linecap="round" opacity=".74"/>
+      <path d="M13 66C22 45 35 35 55 34c9 0 17 3 24 8" fill="none" stroke="url(#rainbow-flow)" stroke-width="5" stroke-linecap="round" opacity=".48"/>
+      <path class="shine" d="M-26 4h12L4 64H-8z" fill="#fff" opacity="0"/>
+    </g>
+    <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="17.25" fill="none" stroke="#173D35" stroke-opacity=".16" stroke-width="1.5"/>
+  </g>
+
+  <g transform="translate(78 0)">
+    <text class="zh" x="0" y="31" fill="url(#word-flow)">彩虹室內設計</text>
+    <text class="en" x="1" y="47" fill="#71817A">RAINBOW INTERIOR DESIGN</text>
+    <rect x="0" y="54" width="230" height="1.5" rx=".75" fill="url(#rainbow-flow)" opacity=".78"/>
+    <circle cx="238" cy="54.75" r="2.2" fill="#D4A65D">
+      <animate attributeName="r" values="2.2;3.2;2.2" dur="3.6s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values=".7;1;.7" dur="3.6s" repeatCount="indefinite"/>
+    </circle>
+  </g>
 </svg>
