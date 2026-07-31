@@ -50,6 +50,7 @@ let payload: DashboardPayload | null = null;
 let cashbookQuery = "";
 let cashbookCategoryId = "";
 let cashbookAdvancedFiltersOpen = false;
+let mobileCreateMenuOpen = false;
 let loading = false;
 type SortDirection = "asc" | "desc";
 type BudgetSortKey = "sortOrder" | "name" | "planned" | "spent" | "remaining" | "percentage";
@@ -329,6 +330,10 @@ function navLink(view: ProjectView, icon: string, label: string, current: Projec
 
 function layout(content: string, view: ProjectView) {
   const project = payload!.project;
+  const selectedQuickPerson = view === "cashflow"
+    ? payload!.people.find((person) => person.id === cashbookPersonId && person.active)
+    : undefined;
+  const quickPersonData = selectedQuickPerson ? ` data-person-id="${selectedQuickPerson.id}"` : "";
   app.innerHTML = `
     <div class="shell topbar-shell">
       <header class="glass-topbar">
@@ -356,6 +361,26 @@ function layout(content: string, view: ProjectView) {
         ${view === "cashflow" ? "" : `<header class="page-heading"><h2>${view === "dashboard" ? "工程資金總覽" : view === "budget" ? "預算分類" : "工程設定"}</h2></header>`}
         ${content}
       </main>
+      ${mobileCreateMenuOpen ? `
+        <button class="mobile-create-scrim" data-action="toggle-mobile-create" aria-label="關閉新增選單"></button>
+        <section class="mobile-create-menu" aria-label="新增交易">
+          <div class="mobile-create-menu-head"><strong>新增交易</strong><small>選擇要建立的紀錄</small></div>
+          <div class="mobile-create-options">
+            <button class="mobile-create-option income-option" data-action="new-entry" data-kind="income"${quickPersonData}><span aria-hidden="true">↓</span><strong>收入</strong><small>工程款入帳</small></button>
+            <button class="mobile-create-option transfer-option" data-action="new-transfer"><span aria-hidden="true">↔</span><strong>移轉</strong><small>人員間轉款</small></button>
+            <button class="mobile-create-option expense-option" data-action="new-entry" data-kind="expense"${quickPersonData}><span aria-hidden="true">↑</span><strong>支出</strong><small>付款或代墊</small></button>
+          </div>
+        </section>` : ""}
+      <nav class="mobile-bottom-nav" aria-label="手機工程導覽">
+        ${navLink("dashboard", "ph-house", "總覽", view)}
+        ${navLink("budget", "ph-chart-donut", "預算", view)}
+        <button class="mobile-create-trigger ${mobileCreateMenuOpen ? "is-open" : ""}" data-action="toggle-mobile-create" aria-expanded="${mobileCreateMenuOpen}" aria-label="${mobileCreateMenuOpen ? "關閉新增選單" : "新增交易"}">
+          <span class="mobile-create-icon" aria-hidden="true">${mobileCreateMenuOpen ? "×" : "+"}</span>
+          <span>新增</span>
+        </button>
+        ${navLink("cashflow", "ph-notebook", "帳本", view)}
+        ${navLink("settings", "ph-sliders-horizontal", "設定", view)}
+      </nav>
     </div>`;
   bindCommon();
 }
@@ -971,9 +996,28 @@ function openTransferModal(existing?: FundTransfer) {
     } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
   });
 }
+
+function closeMobileCreateMenu(): void {
+  mobileCreateMenuOpen = false;
+  document.querySelector(".mobile-create-menu")?.setAttribute("hidden", "");
+  document.querySelector(".mobile-create-scrim")?.setAttribute("hidden", "");
+  const trigger = document.querySelector<HTMLButtonElement>(".mobile-create-trigger");
+  trigger?.classList.remove("is-open");
+  trigger?.setAttribute("aria-expanded", "false");
+  trigger?.setAttribute("aria-label", "新增交易");
+  const icon = trigger?.querySelector<HTMLElement>(".mobile-create-icon");
+  if (icon) icon.textContent = "+";
+}
+
 function bindCommon() {
   document.querySelectorAll<HTMLElement>("[data-action]").forEach((button) => button.addEventListener("click", async () => {
     const action = button.dataset.action;
+    if (action === "toggle-mobile-create") {
+      mobileCreateMenuOpen = !mobileCreateMenuOpen;
+      const route = parseRoute(location.hash);
+      if (route.kind === "project") renderProjectPage(route.view);
+      return;
+    }
     if (action === "logout") {
       session.token = null;
       payload = null;
@@ -1023,7 +1067,10 @@ function bindCommon() {
         toast(reason instanceof Error ? reason.message : "刪除失敗", "error");
       }
     }
-    if (action === "new-entry") openEntryModal(undefined, button.dataset.kind as EntryKind, button.dataset.personId || null);
+    if (action === "new-entry") {
+      closeMobileCreateMenu();
+      openEntryModal(undefined, button.dataset.kind as EntryKind, button.dataset.personId || null);
+    }
     if (action === "edit-entry") openEntryModal(payload!.entries.find((entry) => entry.id === button.dataset.id));
     if (action === "delete-entry" && confirm("確定刪除此筆紀錄與其附件嗎？")) {
       try {
@@ -1044,7 +1091,10 @@ function bindCommon() {
       try { await deletePerson(currentProjectId(), button.dataset.id!); await refresh(); toast("人員已刪除"); }
       catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
     }
-    if (action === "new-transfer") openTransferModal();
+    if (action === "new-transfer") {
+      closeMobileCreateMenu();
+      openTransferModal();
+    }
     if (action === "edit-transfer") openTransferModal(payload!.transfers.find((transfer) => transfer.id === button.dataset.id));
     if (action === "delete-transfer" && confirm("確定刪除此筆資金移轉嗎？")) {
       try { await deleteTransfer(currentProjectId(), button.dataset.id!); await refresh(); toast("資金移轉已刪除"); }
@@ -1055,6 +1105,7 @@ function bindCommon() {
 
 window.addEventListener("hashchange", () => {
   cashbookAdvancedFiltersOpen = false;
+  mobileCreateMenuOpen = false;
   refresh();
 });
 
