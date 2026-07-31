@@ -84,6 +84,7 @@ export interface Project {
   address: string;
   status: ProjectStatus;
   currency: "TWD";
+  ownerBudget: number;
   createdAt: string;
   updatedAt: string;
 }

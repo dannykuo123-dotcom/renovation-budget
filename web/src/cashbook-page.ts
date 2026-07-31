@@ -317,7 +317,7 @@ export function renderCashbookPage(options: CashbookPageOptions): void {
     <section class="cashbook-summary-shell">
       <div class="cashbook-summary-scroll">
         <div class="cashbook-summary-strip cashbook-summary-four">
-          <article class="summary-budget"><small>預算</small><strong>${formatCashbookNumber(totals.planned)}</strong></article>
+          <article class="summary-budget"><small>屋主預算</small><strong>${formatCashbookNumber(payload.project.ownerBudget)}</strong></article>
           <article class="summary-income"><small>收入</small><strong>${formatCashbookNumber(totals.received)}</strong></article>
           <article class="summary-expense"><small>支出</small><strong>${formatCashbookNumber(totals.spent)}</strong></article>
           <article class="summary-balance"><small>餘額</small><strong>${formatCashbookNumber(totals.cashBalance)}</strong></article>

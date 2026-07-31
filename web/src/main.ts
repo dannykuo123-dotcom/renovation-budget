@@ -4,9 +4,9 @@ import "./minimal-ledger.css";
 import "./budget-minimal.css";
 import {
   ApiError,
+  clearBudgetItems,
   createProject,
   deleteBudgetItem,
-  deleteBudgetSpace,
   deleteCategory,
   deleteEntry,
   downloadProjectCsv,
@@ -17,7 +17,7 @@ import {
   loadDashboard,
   loadProjects,
   saveBudgetItem,
-  saveBudgetSpace,
+  saveOwnerBudget,
   savePerson,
   saveTransfer,
   login,
@@ -31,7 +31,7 @@ import {
 import { readCachedFilters, writeCachedFilters } from "./filter-cache";
 import { buildCashbookLedger, calculateBudgetItemSubtotal, calculateTotals, categorySpent, formatMoney, sortCashbookActivities, type CashbookActivity } from "./finance";
 import { renderCashbookPage, type CashbookFilters } from "./cashbook-page";
-import { filterBudgetSpaces } from "./budget-view";
+import { buildBudgetCategoryCards, calculateBudgetOverview, defaultBudgetSpace } from "./budget-category-view";
 import { setBudgetAddMenuOpen } from "./budget-menu";
 import {
   normalizeCashbookViewMode,
@@ -42,7 +42,6 @@ import { personInitial } from "./cashbook-view";
 import { defaultTransferPeople, entryStatusChoices, entryStatusValue, paymentMethodChoices, transferStatusChoices } from "./ledger-form-view";
 import type {
   BudgetItem,
-  BudgetSpace,
   Category,
   DashboardPayload,
   FundTransfer,
@@ -62,9 +61,6 @@ let cashbookAdvancedFiltersOpen = false;
 let mobileCreateMenuOpen = false;
 let loading = false;
 type SortDirection = "asc" | "desc";
-let budgetSpaceId = "";
-let budgetCategoryId = "";
-let budgetExpandedSpaceId = "";
 type CashbookTypeFilter = "all" | "income" | "expense" | "transfer";
 type CashbookStatusFilter = "posted" | "pending";
 let cashbookPersonId = "";
@@ -108,9 +104,6 @@ function resetViewFilters(): void {
   cashbookQuery = "";
   cashbookCategoryId = "";
   cashbookAdvancedFiltersOpen = false;
-  budgetSpaceId = "";
-  budgetCategoryId = "";
-  budgetExpandedSpaceId = "";
   cashbookPersonId = "";
   cashbookTypeFilter = "all";
   cashbookStatusFilter = "posted";
@@ -123,11 +116,7 @@ function restoreViewFilters(projectId: string, view: ProjectView): void {
   const cached = readCachedFilters(localStorage, projectId, view);
   const cachedDirection = cached.sortDirection;
 
-  if (view === "budget") {
-    if (cached.spaceId && payload!.spaces.some((space) => space.id === cached.spaceId)) budgetSpaceId = cached.spaceId;
-    if (cached.categoryId && payload!.categories.some((category) => category.id === cached.categoryId)) budgetCategoryId = cached.categoryId;
-    return;
-  }
+  if (view === "budget") return;
 
   if (view === "cashflow") {
     cashbookQuery = cached.query ?? "";
@@ -149,12 +138,8 @@ function restoreViewFilters(projectId: string, view: ProjectView): void {
 
 function persistViewFilters(view: ProjectView): void {
   const projectId = currentProjectId();
-  if (view === "budget") {
-    writeCachedFilters(localStorage, projectId, view, {
-      spaceId: budgetSpaceId,
-      categoryId: budgetCategoryId,
-    });
-  } else if (view === "cashflow") {
+  if (view === "budget") return;
+  if (view === "cashflow") {
     writeCachedFilters(localStorage, projectId, view, {
       query: cashbookQuery,
       categoryId: cashbookCategoryId,
@@ -185,12 +170,31 @@ function entryStatusText(entry: LedgerEntry): string {
   return entry.status === "posted" ? "已付款" : "待付款";
 }
 
-function toast(message: string, tone = "success") {
+interface ToastAction {
+  label: string;
+  run: () => void | Promise<void>;
+}
+
+function toast(message: string, tone = "success", action?: ToastAction) {
   const element = document.createElement("div");
   element.className = `toast ${tone}`;
-  element.textContent = message;
+  const label = document.createElement("span");
+  label.textContent = message;
+  element.append(label);
+  let timeout = window.setTimeout(() => element.remove(), action ? 6000 : 3000);
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = action.label;
+    button.addEventListener("click", async () => {
+      window.clearTimeout(timeout);
+      button.disabled = true;
+      await action.run();
+      element.remove();
+    });
+    element.append(button);
+  }
   document.body.append(element);
-  setTimeout(() => element.remove(), 3000);
 }
 
 function showLoading() {
@@ -419,80 +423,49 @@ function renderDashboard() {
 }
 
 function renderBudget() {
-  const totals = calculateTotals(payload!.spaces, payload!.entries);
   const formatNumber = (amount: number) => new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(amount);
-  const filteredSpaces = filterBudgetSpaces(payload!.spaces, budgetSpaceId, budgetCategoryId);
-  if (budgetExpandedSpaceId && !filteredSpaces.some((space) => space.id === budgetExpandedSpaceId)) budgetExpandedSpaceId = "";
-  if (!budgetExpandedSpaceId && filteredSpaces.length) budgetExpandedSpaceId = filteredSpaces[0].id;
-  const categoryLabel = (categoryId: string | null) => categoryId
-    ? payload!.categories.find((category) => category.id === categoryId)?.name ?? "未分類"
-    : "未分類";
-  const filterButton = (value: string, label: string, selected: boolean, kind: "space" | "category") =>
-    `<button type="button" class="budget-filter-chip${selected ? " selected" : ""}" data-budget-${kind}="${esc(value)}" aria-pressed="${selected}">${esc(label)}</button>`;
-  const spaceCards = filteredSpaces.map((space) => {
-    const expanded = budgetExpandedSpaceId === space.id;
-    const total = space.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-    return `<article class="budget-space-card${expanded ? " expanded" : ""}">
-      <div class="budget-space-heading">
-        <button type="button" class="budget-space-toggle" data-budget-toggle="${space.id}" aria-expanded="${expanded}">
-          <span><strong>${esc(space.name)}</strong><small>${space.items.length} 項</small></span>
-          <b>${formatNumber(total)}</b>
-          <i class="ph ph-caret-down" aria-hidden="true"></i>
+  const overview = calculateBudgetOverview(payload!.project.ownerBudget, payload!.spaces, payload!.entries);
+  const cards = buildBudgetCategoryCards(payload!.categories, payload!.spaces, payload!.entries);
+  const estimateMessage = overview.estimateGap >= 0
+    ? `尚有 ${formatNumber(overview.estimateGap)} 可規劃`
+    : `超出屋主預算 ${formatNumber(Math.abs(overview.estimateGap))}`;
+  const cardMarkup = cards.map((card) => `<article class="budget-category-card">
+    <header class="budget-category-heading">
+      <div><strong>${esc(card.name)}</strong><small>${card.items.length} 項</small></div>
+      <div class="budget-category-totals"><span><small>目前預算</small><b>${formatNumber(card.planned)}</b></span><span><small>已支出</small><b class="${card.spent > card.planned && card.planned > 0 ? "negative" : ""}">${formatNumber(card.spent)}</b></span></div>
+      <button type="button" class="budget-card-add" data-action="new-budget-item-for-category" data-category-id="${card.id ?? ""}"><i class="ph ph-plus" aria-hidden="true"></i><span>項目</span></button>
+    </header>
+    <div class="budget-items">
+      ${card.items.length ? `<div class="budget-item-columns" aria-hidden="true"><span>項目</span><span>數量</span><span>單價</span><span>小計</span><span></span></div>` : ""}
+      ${card.items.map((item) => `<div class="budget-item-row">
+        <button type="button" class="budget-item-main" data-action="edit-budget-item" data-id="${item.id}" aria-label="編輯 ${esc(item.name)}">
+          <span class="budget-item-name"><strong>${esc(item.name)}</strong><small class="budget-item-mobile-math">${formatNumber(item.quantity)} × ${formatNumber(item.unitPrice)}</small></span>
+          <span class="budget-item-quantity">${formatNumber(item.quantity)}</span>
+          <span class="budget-item-unit">${formatNumber(item.unitPrice)}</span>
+          <b class="budget-item-total">${formatNumber(item.quantity * item.unitPrice)}</b>
         </button>
-        <button type="button" class="budget-space-edit" data-action="edit-budget-space" data-id="${space.id}" aria-label="編輯 ${esc(space.name)}">編輯</button>
-      </div>
-      ${expanded ? `<div class="budget-items">
-        <div class="budget-item-columns" aria-hidden="true"><span>項目</span><span>數量</span><span>單價</span><span>小計</span><span></span></div>
-        ${space.items.map((item) => `<div class="budget-item-row">
-          <button type="button" class="budget-item-main" data-action="edit-budget-item" data-id="${item.id}" aria-label="編輯 ${esc(item.name)}">
-            <span class="budget-item-name"><strong>${esc(item.name)}</strong><small>${esc(categoryLabel(item.categoryId))}</small><small class="budget-item-mobile-math">${formatNumber(item.quantity)} × ${formatNumber(item.unitPrice)}</small></span>
-            <span class="budget-item-quantity">${formatNumber(item.quantity)}</span>
-            <span class="budget-item-unit">${formatNumber(item.unitPrice)}</span>
-            <b class="budget-item-total">${formatNumber(item.quantity * item.unitPrice)}</b>
-          </button>
-          <button type="button" class="budget-item-delete" data-action="delete-budget-item" data-id="${item.id}" aria-label="刪除 ${esc(item.name)}">刪除</button>
-        </div>`).join("")}
-      </div>` : ""}
-    </article>`;
-  }).join("");
+        <button type="button" class="budget-item-delete" data-action="delete-budget-item" data-id="${item.id}" aria-label="刪除 ${esc(item.name)}">−</button>
+      </div>`).join("") || `<button type="button" class="budget-card-empty" data-action="new-budget-item-for-category" data-category-id="${card.id ?? ""}">加入第一個項目</button>`}
+    </div>
+  </article>`).join("");
 
   layout(`
     <section class="budget-summary-bar" aria-label="預算摘要">
-      <div class="budget-summary-metric"><small>總預算</small><strong>${formatNumber(totals.planned)}</strong></div>
-      <div class="budget-summary-metric"><small>已支出</small><strong class="negative">${formatNumber(totals.spent)}</strong></div>
-      <div class="budget-summary-metric"><small>預算餘額</small><strong class="${totals.budgetRemaining < 0 ? "negative" : "income"}">${formatNumber(totals.budgetRemaining)}</strong></div>
+      <div class="budget-summary-metric budget-owner-metric"><div class="budget-summary-label"><small>屋主預算</small><button type="button" data-action="edit-owner-budget" aria-label="編輯屋主預算"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button></div><strong>${formatNumber(overview.ownerBudget)}</strong></div>
+      <div class="budget-summary-metric"><small>目前工程預算</small><strong>${formatNumber(overview.currentBudget)}</strong><span class="budget-summary-note ${overview.estimateGap < 0 ? "negative" : ""}">${estimateMessage}</span></div>
+      <div class="budget-summary-metric"><small>已支出</small><strong class="negative">${formatNumber(overview.spent)}</strong></div>
+      <div class="budget-summary-metric"><small>可用餘額</small><strong class="${overview.available < 0 ? "negative" : "income"}">${formatNumber(overview.available)}</strong></div>
       <div class="budget-add-wrap">
         <button type="button" class="budget-add-button" data-action="toggle-budget-add" aria-label="新增預算內容" aria-expanded="false"><span aria-hidden="true">＋</span></button>
         <div class="budget-add-menu" hidden>
           <button type="button" data-action="new-budget-item"><strong>新增項目</strong><small>數量與單價</small></button>
-          <button type="button" data-action="new-budget-space"><strong>增加空間</strong><small>客廳、廚房等</small></button>
           <button type="button" data-action="manage-budget-categories"><strong>管理分類</strong><small>施工、材料等</small></button>
+          <button type="button" class="danger-text" data-action="clear-budget-items"><strong>清空目前工程預算</strong><small>保留屋主預算與帳本</small></button>
         </div>
       </div>
     </section>
-    <section class="budget-filter-bar" aria-label="預算篩選">
-      <div class="budget-filter-group"><span>空間</span>${filterButton("", "全部", !budgetSpaceId, "space")}${payload!.spaces.map((space) => filterButton(space.id, space.name, budgetSpaceId === space.id, "space")).join("")}</div>
-      <i class="budget-filter-divider" aria-hidden="true"></i>
-      <div class="budget-filter-group"><span>分類</span>${filterButton("", "全部", !budgetCategoryId, "category")}${payload!.categories.map((category) => filterButton(category.id, category.name, budgetCategoryId === category.id, "category")).join("")}</div>
-    </section>
-    <section class="budget-space-list">${spaceCards || `<div class="budget-empty"><strong>${payload!.spaces.length ? "沒有符合的項目" : "先建立第一個空間"}</strong><small>${payload!.spaces.length ? "換一個篩選條件，或新增預算項目。" : "例如客廳、廚房或浴室。"}</small><button class="primary" data-action="${payload!.spaces.length ? "new-budget-item" : "new-budget-space"}">${payload!.spaces.length ? "新增項目" : "增加空間"}</button></div>`}</section>`, "budget");
+    <section class="budget-category-list">${cardMarkup || `<div class="budget-empty"><strong>先建立預算分類</strong><small>例如施工、材料、工具或餐費。</small><button class="primary" data-action="manage-budget-categories">管理分類</button></div>`}</section>`, "budget");
 
-  document.querySelectorAll<HTMLButtonElement>("[data-budget-space]").forEach((button) => button.addEventListener("click", () => {
-    budgetSpaceId = button.dataset.budgetSpace ?? "";
-    budgetExpandedSpaceId = "";
-    persistViewFilters("budget");
-    renderBudget();
-  }));
-  document.querySelectorAll<HTMLButtonElement>("[data-budget-category]").forEach((button) => button.addEventListener("click", () => {
-    budgetCategoryId = button.dataset.budgetCategory ?? "";
-    budgetExpandedSpaceId = "";
-    persistViewFilters("budget");
-    renderBudget();
-  }));
-  document.querySelectorAll<HTMLButtonElement>("[data-budget-toggle]").forEach((button) => button.addEventListener("click", () => {
-    budgetExpandedSpaceId = budgetExpandedSpaceId === button.dataset.budgetToggle ? "" : button.dataset.budgetToggle ?? "";
-    renderBudget();
-  }));
   const addButton = document.querySelector<HTMLButtonElement>("[data-action='toggle-budget-add']");
   const addMenu = document.querySelector<HTMLElement>(".budget-add-menu");
   addButton?.addEventListener("click", (event) => {
@@ -787,43 +760,38 @@ function openProjectModal(existing?: Project) {
   });
 }
 
-function openBudgetSpaceModal(existing?: BudgetSpace) {
+function openOwnerBudgetModal() {
   openModal(`
-    <div class="modal-head minimal-modal-head"><h3>${existing ? "編輯空間" : "增加空間"}</h3><button class="icon-button" data-action="close-modal" aria-label="關閉"><i class="ph ph-x" aria-hidden="true"></i></button></div>
-    <form id="budget-space-form" class="minimal-form">
-      <label>空間名稱<input name="name" maxlength="30" required value="${esc(existing?.name ?? "")}" placeholder="例如：客廳" autofocus /></label>
-      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button>${existing ? `<button type="button" class="secondary danger" data-delete-space>刪除</button>` : ""}<button class="primary" type="submit">儲存</button></div>
+    <div class="modal-head minimal-modal-head"><h3>屋主預算</h3><button class="icon-button" data-action="close-modal" aria-label="關閉"><i class="ph ph-x" aria-hidden="true"></i></button></div>
+    <form id="owner-budget-form" class="minimal-form">
+      <label>預算金額<input name="ownerBudget" type="number" min="0" max="1000000000000" step="1" required value="${payload!.project.ownerBudget}" autofocus /></label>
+      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存</button></div>
     </form>`);
-  const form = document.querySelector<HTMLFormElement>("#budget-space-form")!;
+  const form = document.querySelector<HTMLFormElement>("#owner-budget-form")!;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const amount = Number(new FormData(form).get("ownerBudget"));
+    if (!Number.isSafeInteger(amount) || amount < 0 || amount > 1_000_000_000_000) return toast("請輸入正確的屋主預算", "error");
     try {
-      await saveBudgetSpace(currentProjectId(), { name: String(new FormData(form).get("name")).trim() }, existing?.id);
+      await saveOwnerBudget(currentProjectId(), amount);
       document.querySelector(".modal-backdrop")?.remove();
       await refresh();
-      toast("空間已儲存");
+      toast("屋主預算已更新");
     } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
-  });
-  form.querySelector("[data-delete-space]")?.addEventListener("click", async () => {
-    if (!existing || !confirm(`確定刪除「${existing.name}」嗎？`)) return;
-    try {
-      await deleteBudgetSpace(currentProjectId(), existing.id);
-      document.querySelector(".modal-backdrop")?.remove();
-      await refresh();
-      toast("空間已刪除");
-    } catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
   });
 }
 
-function openBudgetItemModal(existing?: BudgetItem) {
-  if (!payload!.spaces.length) return openBudgetSpaceModal();
-  const selectedSpaceId = (existing?.spaceId ?? budgetSpaceId) || payload!.spaces[0].id;
+function openBudgetItemModal(existing?: BudgetItem, defaultCategoryId?: string) {
+  const selectedSpace = existing
+    ? payload!.spaces.find((space) => space.id === existing.spaceId)
+    : defaultBudgetSpace(payload!.spaces);
+  if (!selectedSpace) return toast("找不到預算項目的預設空間", "error");
+  const selectedCategoryId = existing?.categoryId ?? defaultCategoryId ?? "";
   openModal(`
     <div class="modal-head minimal-modal-head"><h3>${existing ? "編輯項目" : "新增項目"}</h3><button class="icon-button" data-action="close-modal" aria-label="關閉"><i class="ph ph-x" aria-hidden="true"></i></button></div>
     <form id="budget-item-form" class="minimal-form budget-item-form">
-      <label class="full">項目<input name="name" maxlength="60" required value="${esc(existing?.name ?? "")}" placeholder="例如：淘寶吊燈" autofocus /></label>
-      <div class="form-field full"><span class="form-field-label">空間</span>${directChoiceButtons("spaceId", payload!.spaces.map((space) => ({ value: space.id, label: space.name })), selectedSpaceId, "budget-choice-row")}</div>
-      <div class="form-field full"><span class="form-field-label">分類</span>${directChoiceButtons("categoryId", [{ value: "", label: "不分類" }, ...payload!.categories.map((category) => ({ value: category.id, label: category.name }))], existing?.categoryId ?? "", "budget-choice-row")}</div>
+      <label class="full">項目名稱<input name="name" maxlength="60" required value="${esc(existing?.name ?? "")}" placeholder="例如：淘寶吊燈" autofocus /></label>
+      <div class="form-field full"><span class="form-field-label">分類</span>${directChoiceButtons("categoryId", [{ value: "", label: "不分類" }, ...payload!.categories.map((category) => ({ value: category.id, label: category.name }))], selectedCategoryId, "budget-choice-row")}</div>
       <label>數量<input name="quantity" type="number" min="1" step="1" required value="${existing?.quantity ?? 1}" /></label>
       <label>單價<input name="unitPrice" type="number" min="0" step="1" required value="${existing?.unitPrice ?? ""}" placeholder="0" /></label>
       <div class="budget-live-total full"><span>小計</span><strong>0</strong></div>
@@ -847,7 +815,7 @@ function openBudgetItemModal(existing?: BudgetItem) {
     if (calculateBudgetItemSubtotal(quantity, unitPrice) === null) return toast("數量、單價或小計超出範圍", "error");
     try {
       await saveBudgetItem(currentProjectId(), {
-        spaceId: String(data.get("spaceId")),
+        spaceId: selectedSpace.id,
         categoryId: String(data.get("categoryId") || "") || null,
         name: String(data.get("name")).trim(),
         quantity,
@@ -859,7 +827,6 @@ function openBudgetItemModal(existing?: BudgetItem) {
     } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
   });
 }
-
 function openCategoryModal(existing?: Category) {
   openModal(`
     <div class="modal-head minimal-modal-head"><h3>${existing ? "編輯分類" : "新增分類"}</h3><button class="icon-button" data-action="close-modal" aria-label="關閉"><i class="ph ph-x" aria-hidden="true"></i></button></div>
@@ -1159,17 +1126,37 @@ function bindCommon() {
       }
     }
     if (action === "new-budget-item") openBudgetItemModal();
+    if (action === "new-budget-item-for-category") openBudgetItemModal(undefined, button.dataset.categoryId ?? "");
+    if (action === "edit-owner-budget") openOwnerBudgetModal();
     if (action === "edit-budget-item") {
       const item = payload!.spaces.flatMap((space) => space.items).find((candidate) => candidate.id === button.dataset.id);
       openBudgetItemModal(item);
     }
-    if (action === "delete-budget-item" && confirm("確定刪除此預算項目嗎？")) {
-      try { await deleteBudgetItem(currentProjectId(), button.dataset.id!); await refresh(); toast("預算項目已刪除"); }
-      catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
+    if (action === "delete-budget-item") {
+      const item = payload!.spaces.flatMap((space) => space.items).find((candidate) => candidate.id === button.dataset.id);
+      if (!item) return;
+      const snapshot = { spaceId: item.spaceId, categoryId: item.categoryId, name: item.name, quantity: item.quantity, unitPrice: item.unitPrice };
+      try {
+        await deleteBudgetItem(currentProjectId(), item.id);
+        await refresh();
+        toast("項目已刪除", "success", {
+          label: "復原",
+          run: async () => {
+            try {
+              await saveBudgetItem(currentProjectId(), snapshot);
+              await refresh();
+              toast("項目已復原");
+            } catch (reason) { toast(reason instanceof Error ? reason.message : "復原失敗", "error"); }
+          },
+        });
+      } catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
     }
-    if (action === "new-budget-space") openBudgetSpaceModal();
-    if (action === "edit-budget-space") openBudgetSpaceModal(payload!.spaces.find((space) => space.id === button.dataset.id));
-    if (action === "manage-budget-categories") openCategoryManagerModal();    if (action === "new-category") openCategoryModal();
+    if (action === "clear-budget-items" && confirm("只會刪除此工程的預算項目；屋主預算、分類、帳本與其他工程不受影響。確定清空？")) {
+      try { await clearBudgetItems(currentProjectId()); await refresh(); toast("目前工程預算已清空"); }
+      catch (reason) { toast(reason instanceof Error ? reason.message : "清空失敗", "error"); }
+    }
+    if (action === "manage-budget-categories") openCategoryManagerModal();
+    if (action === "new-category") openCategoryModal();
     if (action === "edit-category") openCategoryModal(payload!.categories.find((category) => category.id === button.dataset.id));
     if (action === "delete-category" && confirm("確定刪除此分類嗎？已被支出使用的分類不能直接刪除。")) {
       try {

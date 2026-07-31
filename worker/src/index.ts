@@ -139,6 +139,13 @@ function parseMoney(value: unknown): number | null {
 }
 
 const MAX_BUDGET_ITEM_SUBTOTAL = 1_000_000_000_000;
+const MAX_OWNER_BUDGET = 1_000_000_000_000;
+
+function parseOwnerBudget(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= MAX_OWNER_BUDGET
+    ? value
+    : null;
+}
 
 function parseBudgetItem(input: Record<string, unknown>): BudgetItemInput | null {
   const spaceId = text(input.spaceId, 80);
@@ -273,6 +280,7 @@ const mapProject = (row: Record<string, unknown>) => ({
   address: row.address,
   status: row.status,
   currency: row.currency,
+  ownerBudget: Number(row.owner_budget ?? 0),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -432,6 +440,17 @@ async function projectItem(request: Request, env: Env, projectId: string): Promi
     return json(mapProject((await findProject(projectId, env))!));
   }
   return json({ error: "不支援的方法" }, { status: 405 });
+}
+
+async function ownerBudget(request: Request, env: Env, projectId: string): Promise<Response> {
+  if (request.method !== "PATCH") return json({ error: "不支援的方法" }, { status: 405 });
+  if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
+  const input = await requireJson(request);
+  const amount = parseOwnerBudget(input.ownerBudget);
+  if (amount === null) return json({ error: "屋主預算格式不正確" }, { status: 400 });
+  await env.DB.prepare("UPDATE projects SET owner_budget = ?, updated_at = ? WHERE id = ?")
+    .bind(amount, now(), projectId).run();
+  return json(mapProject((await findProject(projectId, env))!));
 }
 
 async function setProjectStatus(env: Env, projectId: string, status: ProjectStatus): Promise<Response> {
@@ -596,6 +615,11 @@ async function budgetItems(request: Request, env: Env, projectId: string, itemId
   if (!itemId && request.method === "GET") {
     const result = await env.DB.prepare("SELECT id, space_id, category_id, name, quantity, unit_price, planned_amount, sort_order FROM budget_line_items WHERE project_id = ? ORDER BY space_id, sort_order, name").bind(projectId).all<Record<string, unknown>>();
     return json(result.results.map(mapBudgetItem));
+  }
+  if (!itemId && request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM budget_line_items WHERE project_id = ?").bind(projectId).run();
+    await touchProject(projectId, env);
+    return new Response(null, { status: 204 });
   }
   if (!itemId && request.method !== "POST") return json({ error: "找不到預算項目操作" }, { status: 404 });
   const existing = itemId ? await env.DB.prepare("SELECT id, space_id, category_id, name, quantity, unit_price, planned_amount, sort_order FROM budget_line_items WHERE id = ? AND project_id = ?").bind(itemId, projectId).first<Record<string, unknown>>() : null;
@@ -980,6 +1004,8 @@ async function handle(request: Request, env: Env): Promise<Response> {
   }
   const dashboardMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/dashboard$/);
   if (dashboardMatch && request.method === "GET") return dashboard(env, dashboardMatch[1]);
+  const ownerBudgetMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/owner-budget$/);
+  if (ownerBudgetMatch) return ownerBudget(request, env, ownerBudgetMatch[1]);
   const budgetSpaceMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/budget-spaces(?:\/([^/]+))?$/);
   if (budgetSpaceMatch) return budgetSpaces(request, env, budgetSpaceMatch[1], budgetSpaceMatch[2]);
   const budgetItemMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/budget-items(?:\/([^/]+))?$/);

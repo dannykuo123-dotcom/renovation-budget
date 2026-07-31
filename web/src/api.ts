@@ -142,6 +142,7 @@ export async function createProject(input: ProjectInput): Promise<Project> {
       id: crypto.randomUUID(),
       ...input,
       currency: "TWD",
+      ownerBudget: 0,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -161,6 +162,21 @@ export async function updateProject(projectId: string, input: ProjectInput): Pro
     return clone(project);
   }
   return request<Project>(`/api/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export async function saveOwnerBudget(projectId: string, ownerBudget: number): Promise<Project> {
+  if (isDemoMode) {
+    const project = demoProjects.find((item) => item.id === projectId);
+    if (!project) throw new Error("找不到此工程案");
+    project.ownerBudget = ownerBudget;
+    project.updatedAt = now();
+    demoDashboards.get(projectId)!.project = project;
+    return clone(project);
+  }
+  return request<Project>(`/api/projects/${projectId}/owner-budget`, {
+    method: "PATCH",
+    body: JSON.stringify({ ownerBudget }),
+  });
 }
 
 export async function setProjectArchived(projectId: string, archived: boolean): Promise<Project> {
@@ -316,6 +332,18 @@ export async function deleteBudgetItem(projectId: string, itemId: string): Promi
   }
   await request<void>(`/api/projects/${projectId}/budget-items/${itemId}`, { method: "DELETE" });
 }
+
+export async function clearBudgetItems(projectId: string): Promise<void> {
+  if (isDemoMode) {
+    const dashboard = demoDashboards.get(projectId);
+    if (!dashboard) throw new Error("找不到此工程案");
+    dashboard.spaces.forEach((space) => { space.items = []; });
+    touchDemo(projectId);
+    return;
+  }
+  await request<void>(`/api/projects/${projectId}/budget-items`, { method: "DELETE" });
+}
+
 export async function savePerson(projectId: string, input: PersonInput, personId?: string): Promise<Person> {
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;

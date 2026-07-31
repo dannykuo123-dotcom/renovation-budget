@@ -1,47 +1,41 @@
-# Design QA — #1069 空間預算極簡改版
+# Design QA — #1069 屋主預算與分類卡片
 
 ## Visual truth
 
-- Source: `design-qa-artifacts/budget-source-before.png`
-- Source viewport: 1302 × 582 px, 1× density.
-- The source is the existing dense six-column budget table. This implementation intentionally redesigns it to the approved single-layer, space-first layout rather than pixel-cloning it.
+- 原始畫面：`design-qa-artifacts/budget-source-before.png`
+- 原始畫面是六欄財務表；本次依已確認規格改成「屋主預算上限＋分類卡片」，不是逐像素複製。
 
 ## Implementation captures
 
-- Desktop: `design-qa-artifacts/budget-desktop-1440.png`
-- Desktop viewport: 1440 × 900 px, 1× density.
-- Mobile: `design-qa-artifacts/budget-mobile-320.png`
-- Mobile viewport: 320 × 800 px, 1× density.
-- Combined comparison: `design-qa-artifacts/budget-source-comparison.png`.
+- 桌機：`design-qa-artifacts/budget-owner-desktop-1440.png`
+- 桌機 viewport：1440 × 900 px。
+- 手機：`design-qa-artifacts/budget-owner-mobile-320.png`
+- 手機 viewport：320 × 800 px。
 
-## Full-view comparison
+## Information model
 
-- The large title, explanation, colored category dots, sorting arrows, utilization column, and six-column report table are removed.
-- The top region is reduced to one summary row with total budget, actual expense, remaining budget, and the add button.
-- Space and category controls share one horizontally scrollable filter row; at 320 px only that row scrolls and the document width remains 320 px.
-- The content is grouped into compact space accordions. Desktop displays item, quantity, unit price, and subtotal; mobile displays item and subtotal with quantity/unit price as secondary copy.
-
-## Focused surfaces
-
-- Typography: reuses the product font stack; large tabular numerals improve scanability without introducing a competing type family.
-- Spacing: summary, filters, and accordion use the existing compact radius and spacing system; mobile padding is reduced without touching the viewport edges.
-- Colors: the approved dark green remains the selected/primary color; expense red is limited to actual expense and destructive actions.
-- Assets: no decorative image assets are required on this functional budget screen.
-- Copy: labels are reduced to short operational terms; all save actions use `儲存`.
+- 屋主預算：專案層級的手動上限，可隨時編輯，帳本同步顯示同一數值。
+- 目前工程預算：所有預算項目的 `數量 × 單價` 加總。
+- 已支出：只計入帳本中已入帳的支出。
+- 可用餘額：屋主預算減已支出。
+- 預估差額：屋主預算減目前工程預算，以摘要次要文字呈現。
+- 預算項目依分類顯示卡片；空分類仍保留快速新增入口，舊有未分類項目顯示「待分類」。
 
 ## Interaction verification
 
-- Verified add menu and the new item, space, and category flows.
-- Verified live `quantity × unit price` subtotal and project total recomputation.
-- Verified combined space/category filtering, empty state, accordion opening, item editing, and focus-visible treatment.
-- Verified exact accessible names after replacing nested labels with semantic field containers.
-- Verified the 1440 px and 320 px layouts, including no document-level horizontal overflow.
-- Browser console produced no warnings or errors during the tested flow.
+- 驗證屋主預算編輯後預算摘要即時更新，帳本摘要同步顯示相同數值。
+- 驗證分類建立、分類卡片空狀態、卡片內快速新增、數量 × 單價與小計。
+- 驗證項目列可點擊編輯，減號可快速刪除，刪除後提供復原操作。
+- 驗證「清空目前工程預算」只清除目前工程的項目，保留屋主預算、分類、帳本與其他工程。
+- 驗證 1440 px 與 320 px 皆無文件層級水平溢出。
+- 驗證按鈕 accessible name、鍵盤 focus 樣式、Esc 關閉新增選單。
+- 瀏覽器 console 無 warning 或 error。
 
-## Comparison history
+## Visual review
 
-1. First browser pass found P2 confused accessible names caused by interactive buttons nested inside labels.
-2. Replaced those wrappers with semantic `.form-field` containers and rechecked the accessibility snapshot.
-3. Final desktop/mobile captures show no actionable P0, P1, or P2 visual issues.
+- 摘要使用四個等權核心數字與最右側新增按鈕，屋主預算提供輕量鉛筆入口。
+- 分類卡片標題只保留名稱、項目數、目前預算、已支出與快速新增，避免報表感。
+- 桌機保留數量、單價、小計；手機將數量 × 單價降為次要資訊並固定維持單頁寬度。
+- 主要選取色沿用深綠，支出與超額才使用警示紅，沒有額外分類色點。
 
 final result: passed

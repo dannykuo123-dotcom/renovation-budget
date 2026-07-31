@@ -29,6 +29,8 @@
 .ph.ph-list::before { content: "\e2f0"; }
 .ph.ph-magnifying-glass::before { content: "\e30c"; }
 .ph.ph-notebook::before { content: "\e34e"; }
+.ph.ph-pencil-simple::before { content: "\e3b4"; }
+.ph.ph-plus::before { content: "\e3d4"; }
 .ph.ph-sign-out::before { content: "\e42a"; }
 .ph.ph-sliders-horizontal::before { content: "\e434"; }
 .ph.ph-sort-ascending::before { content: "\e444"; }
