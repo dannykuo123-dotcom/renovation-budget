@@ -51,8 +51,10 @@
   gap: 18px 14px;
 }
 
+.minimal-form > *,
 .minimal-form label,
 .minimal-form .choice-field {
+  min-width: 0;
   gap: 8px;
 }
 
@@ -144,6 +146,10 @@
 .date-input-wrap {
   position: relative;
   display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .date-input-wrap .ph {
@@ -157,8 +163,22 @@
   transform: translateY(-50%);
 }
 
-.date-input-wrap input {
+.date-input-wrap input[type="date"] {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding-left: 43px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.date-input-wrap input[type="date"]::-webkit-date-and-time-value,
+.date-input-wrap input[type="date"]::-webkit-datetime-edit {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .date-input-wrap input::-webkit-calendar-picker-indicator {
