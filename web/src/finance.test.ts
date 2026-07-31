@@ -1,17 +1,65 @@
 import { describe, expect, it } from "vitest";
-import { buildCashbookLedger, calculateTotals, sortCashbookActivities } from "./finance";
-import type { Category, FundTransfer, LedgerEntry } from "./types";
+import { buildCashbookLedger, calculateBudgetItemSubtotal, calculateTotals, sortCashbookActivities } from "./finance";
+import type { BudgetSpace, FundTransfer, LedgerEntry } from "./types";
 
-const categories: Category[] = [{ id: "c1", name: "材料", plannedAmount: 100000, color: "#6d5bd0", sortOrder: 1, items: [] }];
+const spaces: BudgetSpace[] = [{ id: "s1", name: "全屋", sortOrder: 1, items: [{ id: "b1", spaceId: "s1", categoryId: "c1", name: "工程預算", quantity: 1, unitPrice: 100000, plannedAmount: 100000, sortOrder: 1 }] }];
 const entry = (kind: LedgerEntry["kind"], amount: number, status: LedgerEntry["status"] = "posted"): LedgerEntry => ({
   id: crypto.randomUUID(), kind, amount, status, description: "x", occurredOn: "2026-07-01", categoryId: "c1", personId: null,
   counterparty: "", paymentMethod: "轉帳", note: "", attachments: [], createdAt: "", updatedAt: "",
 });
 
+describe("calculateBudgetItemSubtotal", () => {
+  it("rejects unsafe or implausibly large subtotals", () => {
+    expect(calculateBudgetItemSubtotal(Number.MAX_SAFE_INTEGER, 2)).toBeNull();
+    expect(calculateBudgetItemSubtotal(1, 1_000_000_000_001)).toBeNull();
+  });
+
+  it("returns quantity times unit price for a valid budget item", () => {
+    expect(calculateBudgetItemSubtotal(3, 2500)).toBe(7500);
+  });
+});
+
 describe("calculateTotals", () => {
   it("separates incoming funds and paid expenses", () => {
-    const totals = calculateTotals(categories, [entry("income", 150000), entry("expense", 50000)]);
+    const totals = calculateTotals(spaces, [entry("income", 150000), entry("expense", 50000)]);
     expect(totals).toEqual({ planned: 100000, received: 150000, spent: 50000, pending: 0, cashBalance: 100000, budgetRemaining: 50000 });
+  });
+
+  it("adds planned budget from the items inside each space", () => {
+    const spaces: BudgetSpace[] = [
+      {
+        id: "living-room",
+        name: "客廳",
+        sortOrder: 1,
+        items: [
+          { id: "lamp", spaceId: "living-room", categoryId: "c1", name: "淘寶吊燈", quantity: 2, unitPrice: 3200, plannedAmount: 6400, sortOrder: 1 },
+          { id: "screen", spaceId: "living-room", categoryId: "c1", name: "紗窗", quantity: 1, unitPrice: 10000, plannedAmount: 10000, sortOrder: 2 },
+        ],
+      },
+    ];
+
+    const totals = calculateTotals(spaces, [entry("expense", 800)]);
+
+    expect(totals.planned).toBe(16400);
+    expect(totals.budgetRemaining).toBe(15600);
+  });
+
+  it("derives each item subtotal from quantity and unit price", () => {
+    const spaces: BudgetSpace[] = [
+      {
+        id: "kitchen",
+        name: "廚房",
+        sortOrder: 1,
+        items: [
+          { id: "tile", spaceId: "kitchen", categoryId: null, name: "壁磚", quantity: 3, unitPrice: 2500, plannedAmount: 1, sortOrder: 1 },
+        ],
+      },
+    ];
+
+    const totals = calculateTotals(spaces, []);
+
+    expect(totals.planned).toBe(7500);
+    expect(totals.budgetRemaining).toBe(7500);
   });
 });
 

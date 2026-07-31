@@ -204,7 +204,7 @@ export function renderCashbookPage(options: CashbookPageOptions): void {
       left.name.localeCompare(right.name, "zh-Hant"));
   const selectedPerson = peopleWithHistory.find((person) => person.id === filters.personId);
   const selectedPersonId = selectedPerson?.id ?? "";
-  const totals = calculateTotals(payload.categories, payload.entries);
+  const totals = calculateTotals(payload.spaces, payload.entries);
   const ledger = buildCashbookLedger(payload.entries, payload.transfers, null);
   const normalizedQuery = filters.query.trim().toLocaleLowerCase("zh-Hant");
   const activities = sortCashbookActivities(

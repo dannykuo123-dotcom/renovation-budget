@@ -1,9 +1,12 @@
 import "./style.css";
 import "./phosphor-subset.css";
 import "./minimal-ledger.css";
+import "./budget-minimal.css";
 import {
   ApiError,
   createProject,
+  deleteBudgetItem,
+  deleteBudgetSpace,
   deleteCategory,
   deleteEntry,
   downloadProjectCsv,
@@ -13,6 +16,8 @@ import {
   isDemoMode,
   loadDashboard,
   loadProjects,
+  saveBudgetItem,
+  saveBudgetSpace,
   savePerson,
   saveTransfer,
   login,
@@ -24,8 +29,10 @@ import {
   uploadAttachments,
 } from "./api";
 import { readCachedFilters, writeCachedFilters } from "./filter-cache";
-import { buildCashbookLedger, calculateTotals, categorySpent, formatMoney, sortCashbookActivities, type CashbookActivity } from "./finance";
+import { buildCashbookLedger, calculateBudgetItemSubtotal, calculateTotals, categorySpent, formatMoney, sortCashbookActivities, type CashbookActivity } from "./finance";
 import { renderCashbookPage, type CashbookFilters } from "./cashbook-page";
+import { filterBudgetSpaces } from "./budget-view";
+import { setBudgetAddMenuOpen } from "./budget-menu";
 import {
   normalizeCashbookViewMode,
   type CashbookViewMode,
@@ -34,6 +41,8 @@ import { parseRoute, projectRoute, projectsRoute, type ProjectView } from "./rou
 import { personInitial } from "./cashbook-view";
 import { defaultTransferPeople, entryStatusChoices, entryStatusValue, paymentMethodChoices, transferStatusChoices } from "./ledger-form-view";
 import type {
+  BudgetItem,
+  BudgetSpace,
   Category,
   DashboardPayload,
   FundTransfer,
@@ -53,10 +62,9 @@ let cashbookAdvancedFiltersOpen = false;
 let mobileCreateMenuOpen = false;
 let loading = false;
 type SortDirection = "asc" | "desc";
-type BudgetSortKey = "sortOrder" | "name" | "planned" | "spent" | "remaining" | "percentage";
-const budgetSortKeys: BudgetSortKey[] = ["sortOrder", "name", "planned", "spent", "remaining", "percentage"];
-let budgetSortKey: BudgetSortKey = "sortOrder";
-let budgetSortDirection: SortDirection = "asc";
+let budgetSpaceId = "";
+let budgetCategoryId = "";
+let budgetExpandedSpaceId = "";
 type CashbookTypeFilter = "all" | "income" | "expense" | "transfer";
 type CashbookStatusFilter = "posted" | "pending";
 let cashbookPersonId = "";
@@ -100,8 +108,9 @@ function resetViewFilters(): void {
   cashbookQuery = "";
   cashbookCategoryId = "";
   cashbookAdvancedFiltersOpen = false;
-  budgetSortKey = "sortOrder";
-  budgetSortDirection = "asc";
+  budgetSpaceId = "";
+  budgetCategoryId = "";
+  budgetExpandedSpaceId = "";
   cashbookPersonId = "";
   cashbookTypeFilter = "all";
   cashbookStatusFilter = "posted";
@@ -115,8 +124,8 @@ function restoreViewFilters(projectId: string, view: ProjectView): void {
   const cachedDirection = cached.sortDirection;
 
   if (view === "budget") {
-    if (budgetSortKeys.includes(cached.sortKey as BudgetSortKey)) budgetSortKey = cached.sortKey as BudgetSortKey;
-    if (cachedDirection === "asc" || cachedDirection === "desc") budgetSortDirection = cachedDirection;
+    if (cached.spaceId && payload!.spaces.some((space) => space.id === cached.spaceId)) budgetSpaceId = cached.spaceId;
+    if (cached.categoryId && payload!.categories.some((category) => category.id === cached.categoryId)) budgetCategoryId = cached.categoryId;
     return;
   }
 
@@ -142,8 +151,8 @@ function persistViewFilters(view: ProjectView): void {
   const projectId = currentProjectId();
   if (view === "budget") {
     writeCachedFilters(localStorage, projectId, view, {
-      sortKey: budgetSortKey,
-      sortDirection: budgetSortDirection,
+      spaceId: budgetSpaceId,
+      categoryId: budgetCategoryId,
     });
   } else if (view === "cashflow") {
     writeCachedFilters(localStorage, projectId, view, {
@@ -174,14 +183,6 @@ function entryStatusText(entry: LedgerEntry): string {
   if (entry.status === "void") return "已作廢";
   if (entry.kind === "income") return "已入帳";
   return entry.status === "posted" ? "已付款" : "待付款";
-}
-
-function sortIndicator(key: string, currentKey: string, direction: SortDirection): string {
-  return key === currentKey ? (direction === "asc" ? "↑" : "↓") : "↕";
-}
-
-function compareSortValue(left: string | number, right: string | number): number {
-  return typeof left === "string" ? left.localeCompare(String(right), "zh-Hant") : left - Number(right);
 }
 
 function toast(message: string, tone = "success") {
@@ -358,7 +359,7 @@ function layout(content: string, view: ProjectView) {
         </div>
       </header>
       <main class="main">
-        ${view === "cashflow" ? "" : `<header class="page-heading"><h2>${view === "dashboard" ? "工程資金總覽" : view === "budget" ? "預算分類" : "工程設定"}</h2></header>`}
+        ${view === "cashflow" || view === "budget" ? "" : `<header class="page-heading"><h2>${view === "dashboard" ? "工程資金總覽" : "工程設定"}</h2></header>`}
         ${content}
       </main>
       ${mobileCreateMenuOpen ? `
@@ -386,7 +387,7 @@ function layout(content: string, view: ProjectView) {
 }
 
 function renderDashboard() {
-  const totals = calculateTotals(payload!.categories, payload!.entries);
+  const totals = calculateTotals(payload!.spaces, payload!.entries);
   const recent = [...payload!.entries].sort((a, b) => b.occurredOn.localeCompare(a.occurredOn)).slice(0, 5);
   const usage = totals.planned ? Math.min(100, Math.max(0, Math.round(totals.spent / totals.planned * 100))) : 0;
   const expenseSummary = totals.pending ? `待付款 ${formatMoney(totals.pending)}` : "所有付款已完成";
@@ -404,8 +405,9 @@ function renderDashboard() {
         <div class="progress-meta"><span>已支出 ${formatMoney(totals.spent)}</span><span>預估 ${formatMoney(totals.planned)}</span></div>
         <div class="category-bars">${payload!.categories.map((category) => {
           const spent = categorySpent(category.id, payload!.entries);
-          const percent = category.plannedAmount ? Math.min(100, Math.max(0, Math.round(spent / category.plannedAmount * 100))) : 0;
-          return `<div class="category-bar"><div><span class="color-dot" style="background:${category.color}"></span><strong>${esc(category.name)}</strong><small>${formatMoney(spent)} / ${formatMoney(category.plannedAmount)}</small></div><div class="mini-track"><i style="width:${percent}%;background:${category.color}"></i></div></div>`;
+          const planned = payload!.spaces.flatMap((space) => space.items).filter((item) => item.categoryId === category.id).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+          const percent = planned ? Math.min(100, Math.max(0, Math.round(spent / planned * 100))) : 0;
+          return `<div class="category-bar"><div><span class="color-dot" style="background:${category.color}"></span><strong>${esc(category.name)}</strong><small>${formatMoney(spent)} / ${formatMoney(planned)}</small></div><div class="mini-track"><i style="width:${percent}%;background:${category.color}"></i></div></div>`;
         }).join("") || '<p class="empty">尚未建立預算分類</p>'}</div>
       </article>
       <article class="panel recent">
@@ -417,43 +419,101 @@ function renderDashboard() {
 }
 
 function renderBudget() {
-  const rows = payload!.categories.map((category) => {
-    const spent = categorySpent(category.id, payload!.entries);
-    const percentage = category.plannedAmount ? Math.round(spent / category.plannedAmount * 100) : 0;
-    return { category, spent, percentage };
-  }).sort((left, right) => {
-    const value = (row: typeof left): string | number => {
-      if (budgetSortKey === "sortOrder") return row.category.sortOrder;
-      if (budgetSortKey === "name") return row.category.name;
-      if (budgetSortKey === "planned") return row.category.plannedAmount;
-      if (budgetSortKey === "spent") return row.spent;
-      if (budgetSortKey === "remaining") return row.category.plannedAmount - row.spent;
-      return row.percentage;
-    };
-    const compare = compareSortValue(value(left), value(right));
-    return budgetSortDirection === "asc" ? compare : -compare;
-  });
+  const totals = calculateTotals(payload!.spaces, payload!.entries);
+  const formatNumber = (amount: number) => new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(amount);
+  const filteredSpaces = filterBudgetSpaces(payload!.spaces, budgetSpaceId, budgetCategoryId);
+  if (budgetExpandedSpaceId && !filteredSpaces.some((space) => space.id === budgetExpandedSpaceId)) budgetExpandedSpaceId = "";
+  if (!budgetExpandedSpaceId && filteredSpaces.length) budgetExpandedSpaceId = filteredSpaces[0].id;
+  const categoryLabel = (categoryId: string | null) => categoryId
+    ? payload!.categories.find((category) => category.id === categoryId)?.name ?? "未分類"
+    : "未分類";
+  const filterButton = (value: string, label: string, selected: boolean, kind: "space" | "category") =>
+    `<button type="button" class="budget-filter-chip${selected ? " selected" : ""}" data-budget-${kind}="${esc(value)}" aria-pressed="${selected}">${esc(label)}</button>`;
+  const spaceCards = filteredSpaces.map((space) => {
+    const expanded = budgetExpandedSpaceId === space.id;
+    const total = space.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    return `<article class="budget-space-card${expanded ? " expanded" : ""}">
+      <div class="budget-space-heading">
+        <button type="button" class="budget-space-toggle" data-budget-toggle="${space.id}" aria-expanded="${expanded}">
+          <span><strong>${esc(space.name)}</strong><small>${space.items.length} 項</small></span>
+          <b>${formatNumber(total)}</b>
+          <i class="ph ph-caret-down" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="budget-space-edit" data-action="edit-budget-space" data-id="${space.id}" aria-label="編輯 ${esc(space.name)}">編輯</button>
+      </div>
+      ${expanded ? `<div class="budget-items">
+        <div class="budget-item-columns" aria-hidden="true"><span>項目</span><span>數量</span><span>單價</span><span>小計</span><span></span></div>
+        ${space.items.map((item) => `<div class="budget-item-row">
+          <button type="button" class="budget-item-main" data-action="edit-budget-item" data-id="${item.id}" aria-label="編輯 ${esc(item.name)}">
+            <span class="budget-item-name"><strong>${esc(item.name)}</strong><small>${esc(categoryLabel(item.categoryId))}</small><small class="budget-item-mobile-math">${formatNumber(item.quantity)} × ${formatNumber(item.unitPrice)}</small></span>
+            <span class="budget-item-quantity">${formatNumber(item.quantity)}</span>
+            <span class="budget-item-unit">${formatNumber(item.unitPrice)}</span>
+            <b class="budget-item-total">${formatNumber(item.quantity * item.unitPrice)}</b>
+          </button>
+          <button type="button" class="budget-item-delete" data-action="delete-budget-item" data-id="${item.id}" aria-label="刪除 ${esc(item.name)}">刪除</button>
+        </div>`).join("")}
+      </div>` : ""}
+    </article>`;
+  }).join("");
+
   layout(`
-    <section class="page-actions"><p>規劃各類工程的預估支出，並自動比對實際金額。</p><button class="primary" data-action="new-category">＋ 新增分類</button></section>
-    <section class="panel table-panel desktop-table"><div class="table-wrap"><table><thead><tr><th><button class="sort-button" data-sort-budget="name">分類 ${sortIndicator("name", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="planned">預估預算 ${sortIndicator("planned", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="spent">實際支出 ${sortIndicator("spent", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="remaining">剩餘 ${sortIndicator("remaining", budgetSortKey, budgetSortDirection)}</button></th><th><button class="sort-button" data-sort-budget="percentage">使用率 ${sortIndicator("percentage", budgetSortKey, budgetSortDirection)}</button></th><th></th></tr></thead><tbody>
-      ${rows.map(({ category, spent, percentage }) => `<tr><td><span class="color-dot" style="background:${category.color}"></span><strong class="budget-category-name">${esc(category.name)}</strong>${category.items.length ? `<div class="budget-item-list">${category.items.map((item) => `<span>${esc(item.name)} <b>${formatMoney(item.plannedAmount)}</b></span>`).join("")}</div>` : '<small class="budget-item-empty">尚未設定細項</small>'}</td><td>${formatMoney(category.plannedAmount)}</td><td>${formatMoney(spent)}</td><td class="${category.plannedAmount - spent < 0 ? "negative" : ""}">${formatMoney(category.plannedAmount - spent)}</td><td><div class="percentage"><i style="width:${Math.min(100, Math.max(0, percentage))}%;background:${category.color}"></i><span>${percentage}%</span></div></td><td class="row-actions"><button data-action="edit-category" data-id="${category.id}">編輯</button><button data-action="delete-category" data-id="${category.id}">刪除</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">還沒有分類，先新增一個預算分類吧。</td></tr>'}
-    </tbody></table></div></section>
-    <section class="mobile-record-list">${rows.map(({ category, spent, percentage }) => `
-      <article class="mobile-record-card">
-        <div class="mobile-record-head"><strong><span class="color-dot" style="background:${category.color}"></span>${esc(category.name)}</strong><span>${percentage}%</span></div>
-        ${category.items.length ? `<div class="mobile-budget-items">${category.items.map((item) => `<span>${esc(item.name)}<b>${formatMoney(item.plannedAmount)}</b></span>`).join("")}</div>` : '<small class="budget-item-empty">尚未設定細項</small>'}
-        <div class="mobile-record-grid"><div><small>預估</small><b>${formatMoney(category.plannedAmount)}</b></div><div><small>已支出</small><b>${formatMoney(spent)}</b></div><div><small>剩餘</small><b class="${category.plannedAmount - spent < 0 ? "negative" : ""}">${formatMoney(category.plannedAmount - spent)}</b></div></div>
-        <div class="mobile-record-actions"><button data-action="edit-category" data-id="${category.id}">編輯</button><button class="danger-text" data-action="delete-category" data-id="${category.id}">刪除</button></div>
-      </article>`).join("") || '<div class="panel empty">還沒有分類，先新增一個預算分類吧。</div>'}</section>`, "budget");
-  document.querySelectorAll<HTMLElement>("[data-sort-budget]").forEach((button) => button.addEventListener("click", () => {
-    const key = button.dataset.sortBudget as BudgetSortKey;
-    budgetSortDirection = key === budgetSortKey && budgetSortDirection === "asc" ? "desc" : "asc";
-    budgetSortKey = key;
+    <section class="budget-summary-bar" aria-label="預算摘要">
+      <div class="budget-summary-metric"><small>總預算</small><strong>${formatNumber(totals.planned)}</strong></div>
+      <div class="budget-summary-metric"><small>已支出</small><strong class="negative">${formatNumber(totals.spent)}</strong></div>
+      <div class="budget-summary-metric"><small>預算餘額</small><strong class="${totals.budgetRemaining < 0 ? "negative" : "income"}">${formatNumber(totals.budgetRemaining)}</strong></div>
+      <div class="budget-add-wrap">
+        <button type="button" class="budget-add-button" data-action="toggle-budget-add" aria-label="新增預算內容" aria-expanded="false"><span aria-hidden="true">＋</span></button>
+        <div class="budget-add-menu" hidden>
+          <button type="button" data-action="new-budget-item"><strong>新增項目</strong><small>數量與單價</small></button>
+          <button type="button" data-action="new-budget-space"><strong>增加空間</strong><small>客廳、廚房等</small></button>
+          <button type="button" data-action="manage-budget-categories"><strong>管理分類</strong><small>施工、材料等</small></button>
+        </div>
+      </div>
+    </section>
+    <section class="budget-filter-bar" aria-label="預算篩選">
+      <div class="budget-filter-group"><span>空間</span>${filterButton("", "全部", !budgetSpaceId, "space")}${payload!.spaces.map((space) => filterButton(space.id, space.name, budgetSpaceId === space.id, "space")).join("")}</div>
+      <i class="budget-filter-divider" aria-hidden="true"></i>
+      <div class="budget-filter-group"><span>分類</span>${filterButton("", "全部", !budgetCategoryId, "category")}${payload!.categories.map((category) => filterButton(category.id, category.name, budgetCategoryId === category.id, "category")).join("")}</div>
+    </section>
+    <section class="budget-space-list">${spaceCards || `<div class="budget-empty"><strong>${payload!.spaces.length ? "沒有符合的項目" : "先建立第一個空間"}</strong><small>${payload!.spaces.length ? "換一個篩選條件，或新增預算項目。" : "例如客廳、廚房或浴室。"}</small><button class="primary" data-action="${payload!.spaces.length ? "new-budget-item" : "new-budget-space"}">${payload!.spaces.length ? "新增項目" : "增加空間"}</button></div>`}</section>`, "budget");
+
+  document.querySelectorAll<HTMLButtonElement>("[data-budget-space]").forEach((button) => button.addEventListener("click", () => {
+    budgetSpaceId = button.dataset.budgetSpace ?? "";
+    budgetExpandedSpaceId = "";
     persistViewFilters("budget");
     renderBudget();
   }));
+  document.querySelectorAll<HTMLButtonElement>("[data-budget-category]").forEach((button) => button.addEventListener("click", () => {
+    budgetCategoryId = button.dataset.budgetCategory ?? "";
+    budgetExpandedSpaceId = "";
+    persistViewFilters("budget");
+    renderBudget();
+  }));
+  document.querySelectorAll<HTMLButtonElement>("[data-budget-toggle]").forEach((button) => button.addEventListener("click", () => {
+    budgetExpandedSpaceId = budgetExpandedSpaceId === button.dataset.budgetToggle ? "" : button.dataset.budgetToggle ?? "";
+    renderBudget();
+  }));
+  const addButton = document.querySelector<HTMLButtonElement>("[data-action='toggle-budget-add']");
+  const addMenu = document.querySelector<HTMLElement>(".budget-add-menu");
+  addButton?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!addMenu) return;
+    const open = addMenu.hidden;
+    setBudgetAddMenuOpen(addMenu, addButton, open);
+    if (open) {
+      const close = (closeEvent: Event) => {
+        if (closeEvent.type === "keydown" && (closeEvent as KeyboardEvent).key !== "Escape") return;
+        const actionClick = closeEvent.type === "click" && addMenu.contains(closeEvent.target as Node) && Boolean((closeEvent.target as HTMLElement).closest("button"));
+        if (closeEvent.type === "click" && addMenu.contains(closeEvent.target as Node) && !actionClick) return;
+        setBudgetAddMenuOpen(addMenu, addButton, false, !actionClick);
+        document.removeEventListener("click", close);
+        document.removeEventListener("keydown", close);
+      };
+      document.addEventListener("click", close);
+      document.addEventListener("keydown", close);
+    }
+  });
 }
-
 function transferStatusText(status: FundTransfer["status"]): string {
   return status === "posted" ? "已完成" : status === "pending" ? "待處理" : "已作廢";
 }
@@ -693,6 +753,9 @@ function openModal(content: string) {
     if (event.target === modal || (event.target as HTMLElement).closest("[data-action='close-modal']")) modal.remove();
   });
   document.body.append(modal);
+  const dialog = modal.querySelector<HTMLElement>(".modal")!;
+  dialog.tabIndex = -1;
+  queueMicrotask(() => (dialog.querySelector<HTMLElement>("[autofocus]") ?? dialog.querySelector<HTMLElement>("button, input, select, textarea") ?? dialog).focus());
 }
 
 function openProjectModal(existing?: Project) {
@@ -724,83 +787,122 @@ function openProjectModal(existing?: Project) {
   });
 }
 
-function openCategoryModal(existing?: Category) {
+function openBudgetSpaceModal(existing?: BudgetSpace) {
   openModal(`
-    <div class="modal-head"><div><p class="eyebrow">BUDGET CATEGORY</p><h3>${existing ? "編輯分類" : "新增分類"}</h3></div><button class="icon-button" data-action="close-modal">×</button></div>
-    <form id="category-form" class="form-grid">
-      <label>分類名稱<input name="name" maxlength="30" required value="${esc(existing?.name ?? "")}" placeholder="例如：配電工程" /></label>
-      <label>分類總預算<input name="plannedAmount" type="number" min="0" step="1" required value="${existing?.plannedAmount ?? ""}" placeholder="0" /></label>
-      <label>識別顏色<input name="color" type="color" value="${existing?.color ?? "#1d6f63"}" /></label>
-      <section class="budget-detail-editor full">
-        <div class="budget-detail-head"><div><strong>預算細項</strong><small>新增細項後，分類總預算會自動加總。</small></div><button class="secondary small-button" type="button" data-action="add-budget-item">＋ 新增細項</button></div>
-        <div class="budget-detail-rows"></div>
-        <p class="form-hint budget-detail-total">尚未新增細項，可直接填寫分類總預算。</p>
-      </section>
-      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存分類</button></div>
+    <div class="modal-head minimal-modal-head"><h3>${existing ? "編輯空間" : "增加空間"}</h3><button class="icon-button" data-action="close-modal" aria-label="關閉"><i class="ph ph-x" aria-hidden="true"></i></button></div>
+    <form id="budget-space-form" class="minimal-form">
+      <label>空間名稱<input name="name" maxlength="30" required value="${esc(existing?.name ?? "")}" placeholder="例如：客廳" autofocus /></label>
+      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button>${existing ? `<button type="button" class="secondary danger" data-delete-space>刪除</button>` : ""}<button class="primary" type="submit">儲存</button></div>
     </form>`);
-  const formElement = document.querySelector<HTMLFormElement>("#category-form")!;
-  const detailRows = formElement.querySelector<HTMLElement>(".budget-detail-rows")!;
-  const plannedInput = formElement.elements.namedItem("plannedAmount") as HTMLInputElement;
-  const detailTotal = formElement.querySelector<HTMLElement>(".budget-detail-total")!;
-  const itemRow = (name = "", plannedAmount = "") => `<div class="budget-detail-row">
-    <input name="itemName" maxlength="60" value="${esc(name)}" placeholder="細項名稱，例如：木工（隔間）" />
-    <input name="itemAmount" type="number" min="0" step="1" value="${plannedAmount}" placeholder="金額" />
-    <button class="icon-button detail-remove" type="button" aria-label="移除細項" data-action="remove-budget-item">×</button>
-  </div>`;
-  const syncDetails = () => {
-    const rows = [...detailRows.querySelectorAll<HTMLElement>(".budget-detail-row")];
-    const total = rows.reduce((sum, row) => sum + Math.max(0, Number((row.querySelector("[name='itemAmount']") as HTMLInputElement).value) || 0), 0);
-    const hasDetails = rows.length > 0;
-    plannedInput.readOnly = hasDetails;
-    plannedInput.required = !hasDetails;
-    plannedInput.value = hasDetails ? String(total) : (existing?.plannedAmount ? String(existing.plannedAmount) : "");
-    detailTotal.textContent = hasDetails
-      ? `細項合計：${formatMoney(total)}（分類總預算已自動帶入）`
-      : "尚未新增細項，可直接填寫分類總預算。";
-  };
-  const addDetail = (name = "", plannedAmount = "") => {
-    detailRows.insertAdjacentHTML("beforeend", itemRow(name, plannedAmount));
-    syncDetails();
-  };
-  existing?.items.forEach((item) => addDetail(item.name, String(item.plannedAmount)));
-  formElement.addEventListener("click", (event) => {
-    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
-    if (!button) return;
-    if (button.dataset.action === "add-budget-item") addDetail();
-    if (button.dataset.action === "remove-budget-item") {
-      button.closest(".budget-detail-row")?.remove();
-      syncDetails();
-    }
-  });
-  detailRows.addEventListener("input", syncDetails);
-  syncDetails();
-  formElement.addEventListener("submit", async (event) => {
+  const form = document.querySelector<HTMLFormElement>("#budget-space-form")!;
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = new FormData(formElement);
-    const items = [...detailRows.querySelectorAll<HTMLElement>(".budget-detail-row")]
-      .map((row) => ({
-        name: (row.querySelector("[name='itemName']") as HTMLInputElement).value.trim(),
-        plannedAmount: Number((row.querySelector("[name='itemAmount']") as HTMLInputElement).value),
-      }));
-    if (items.some((item) => !item.name || !Number.isSafeInteger(item.plannedAmount) || item.plannedAmount < 0)) {
-      return toast("每筆細項都需要名稱與非負整數金額。", "error");
-    }
     try {
-      await saveCategory(currentProjectId(), {
-        name: String(form.get("name")).trim(),
-        plannedAmount: Number(form.get("plannedAmount")),
-        color: String(form.get("color")),
-        items,
-      }, existing?.id);
+      await saveBudgetSpace(currentProjectId(), { name: String(new FormData(form).get("name")).trim() }, existing?.id);
       document.querySelector(".modal-backdrop")?.remove();
       await refresh();
-      toast("分類已儲存");
-    } catch (reason) {
-      toast(reason instanceof Error ? reason.message : "儲存失敗", "error");
-    }
+      toast("空間已儲存");
+    } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
+  });
+  form.querySelector("[data-delete-space]")?.addEventListener("click", async () => {
+    if (!existing || !confirm(`確定刪除「${existing.name}」嗎？`)) return;
+    try {
+      await deleteBudgetSpace(currentProjectId(), existing.id);
+      document.querySelector(".modal-backdrop")?.remove();
+      await refresh();
+      toast("空間已刪除");
+    } catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
   });
 }
 
+function openBudgetItemModal(existing?: BudgetItem) {
+  if (!payload!.spaces.length) return openBudgetSpaceModal();
+  const selectedSpaceId = (existing?.spaceId ?? budgetSpaceId) || payload!.spaces[0].id;
+  openModal(`
+    <div class="modal-head minimal-modal-head"><h3>${existing ? "編輯項目" : "新增項目"}</h3><button class="icon-button" data-action="close-modal" aria-label="關閉"><i class="ph ph-x" aria-hidden="true"></i></button></div>
+    <form id="budget-item-form" class="minimal-form budget-item-form">
+      <label class="full">項目<input name="name" maxlength="60" required value="${esc(existing?.name ?? "")}" placeholder="例如：淘寶吊燈" autofocus /></label>
+      <div class="form-field full"><span class="form-field-label">空間</span>${directChoiceButtons("spaceId", payload!.spaces.map((space) => ({ value: space.id, label: space.name })), selectedSpaceId, "budget-choice-row")}</div>
+      <div class="form-field full"><span class="form-field-label">分類</span>${directChoiceButtons("categoryId", [{ value: "", label: "不分類" }, ...payload!.categories.map((category) => ({ value: category.id, label: category.name }))], existing?.categoryId ?? "", "budget-choice-row")}</div>
+      <label>數量<input name="quantity" type="number" min="1" step="1" required value="${existing?.quantity ?? 1}" /></label>
+      <label>單價<input name="unitPrice" type="number" min="0" step="1" required value="${existing?.unitPrice ?? ""}" placeholder="0" /></label>
+      <div class="budget-live-total full"><span>小計</span><strong>0</strong></div>
+      <div class="form-submit full"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存</button></div>
+    </form>`);
+  const form = document.querySelector<HTMLFormElement>("#budget-item-form")!;
+  bindDirectChoices(form);
+  const syncTotal = () => {
+    const quantity = Number((form.elements.namedItem("quantity") as HTMLInputElement).value) || 0;
+    const unitPrice = Number((form.elements.namedItem("unitPrice") as HTMLInputElement).value) || 0;
+    const subtotal = calculateBudgetItemSubtotal(quantity, unitPrice);
+    form.querySelector<HTMLElement>(".budget-live-total strong")!.textContent = subtotal === null ? "超出範圍" : new Intl.NumberFormat("zh-TW").format(subtotal);
+  };
+  form.addEventListener("input", syncTotal);
+  syncTotal();
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const quantity = Number(data.get("quantity"));
+    const unitPrice = Number(data.get("unitPrice"));
+    if (calculateBudgetItemSubtotal(quantity, unitPrice) === null) return toast("數量、單價或小計超出範圍", "error");
+    try {
+      await saveBudgetItem(currentProjectId(), {
+        spaceId: String(data.get("spaceId")),
+        categoryId: String(data.get("categoryId") || "") || null,
+        name: String(data.get("name")).trim(),
+        quantity,
+        unitPrice,
+      }, existing?.id);
+      document.querySelector(".modal-backdrop")?.remove();
+      await refresh();
+      toast("預算項目已儲存");
+    } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
+  });
+}
+
+function openCategoryModal(existing?: Category) {
+  openModal(`
+    <div class="modal-head minimal-modal-head"><h3>${existing ? "編輯分類" : "新增分類"}</h3><button class="icon-button" data-action="close-modal" aria-label="關閉"><i class="ph ph-x" aria-hidden="true"></i></button></div>
+    <form id="category-form" class="minimal-form">
+      <label>分類名稱<input name="name" maxlength="30" required value="${esc(existing?.name ?? "")}" placeholder="例如：材料" autofocus /></label>
+      <div class="form-submit"><button type="button" class="secondary" data-action="close-modal">取消</button><button class="primary" type="submit">儲存</button></div>
+    </form>`);
+  const form = document.querySelector<HTMLFormElement>("#category-form")!;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await saveCategory(currentProjectId(), { name: String(new FormData(form).get("name")).trim(), color: existing?.color ?? "#1d6f63" }, existing?.id);
+      document.querySelector(".modal-backdrop")?.remove();
+      await refresh();
+      toast("分類已儲存");
+    } catch (reason) { toast(reason instanceof Error ? reason.message : "儲存失敗", "error"); }
+  });
+}
+
+function openCategoryManagerModal() {
+  openModal(`
+    <div class="modal-head minimal-modal-head"><h3>管理分類</h3><button class="icon-button" data-action="close-modal" aria-label="關閉"><i class="ph ph-x" aria-hidden="true"></i></button></div>
+    <div class="budget-category-manager">
+      ${payload!.categories.map((category) => `<div><strong>${esc(category.name)}</strong><span><button type="button" data-manager-edit="${category.id}">編輯</button><button type="button" class="danger-text" data-manager-delete="${category.id}">刪除</button></span></div>`).join("") || '<p class="empty">尚未建立分類</p>'}
+      <button type="button" class="primary" data-manager-add>新增分類</button>
+    </div>`);
+  document.querySelector("[data-manager-add]")?.addEventListener("click", () => { document.querySelector(".modal-backdrop")?.remove(); openCategoryModal(); });
+  document.querySelectorAll<HTMLButtonElement>("[data-manager-edit]").forEach((button) => button.addEventListener("click", () => {
+    const category = payload!.categories.find((item) => item.id === button.dataset.managerEdit);
+    document.querySelector(".modal-backdrop")?.remove();
+    openCategoryModal(category);
+  }));
+  document.querySelectorAll<HTMLButtonElement>("[data-manager-delete]").forEach((button) => button.addEventListener("click", async () => {
+    const category = payload!.categories.find((item) => item.id === button.dataset.managerDelete);
+    if (!category || !confirm(`確定刪除「${category.name}」嗎？`)) return;
+    try {
+      await deleteCategory(currentProjectId(), category.id);
+      document.querySelector(".modal-backdrop")?.remove();
+      await refresh();
+      toast("分類已刪除");
+    } catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
+  }));
+}
 interface FormChoice {
   value: string;
   label: string;
@@ -1056,7 +1158,18 @@ function bindCommon() {
         toast(reason instanceof Error ? reason.message : "下載失敗", "error");
       }
     }
-    if (action === "new-category") openCategoryModal();
+    if (action === "new-budget-item") openBudgetItemModal();
+    if (action === "edit-budget-item") {
+      const item = payload!.spaces.flatMap((space) => space.items).find((candidate) => candidate.id === button.dataset.id);
+      openBudgetItemModal(item);
+    }
+    if (action === "delete-budget-item" && confirm("確定刪除此預算項目嗎？")) {
+      try { await deleteBudgetItem(currentProjectId(), button.dataset.id!); await refresh(); toast("預算項目已刪除"); }
+      catch (reason) { toast(reason instanceof Error ? reason.message : "刪除失敗", "error"); }
+    }
+    if (action === "new-budget-space") openBudgetSpaceModal();
+    if (action === "edit-budget-space") openBudgetSpaceModal(payload!.spaces.find((space) => space.id === button.dataset.id));
+    if (action === "manage-budget-categories") openCategoryManagerModal();    if (action === "new-category") openCategoryModal();
     if (action === "edit-category") openCategoryModal(payload!.categories.find((category) => category.id === button.dataset.id));
     if (action === "delete-category" && confirm("確定刪除此分類嗎？已被支出使用的分類不能直接刪除。")) {
       try {

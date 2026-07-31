@@ -15,17 +15,26 @@ export interface Attachment {
 export interface Category {
   id: string;
   name: string;
-  plannedAmount: number;
   color: string;
   sortOrder: number;
-  items: BudgetItem[];
 }
 
 export interface BudgetItem {
   id: string;
+  spaceId: string;
+  categoryId: string | null;
   name: string;
   plannedAmount: number;
+  quantity: number;
+  unitPrice: number;
   sortOrder: number;
+}
+
+export interface BudgetSpace {
+  id: string;
+  name: string;
+  sortOrder: number;
+  items: BudgetItem[];
 }
 
 export interface LedgerEntry {
@@ -92,4 +101,5 @@ export interface DashboardPayload {
   entries: LedgerEntry[];
   people: Person[];
   transfers: FundTransfer[];
+  spaces: BudgetSpace[];
 }

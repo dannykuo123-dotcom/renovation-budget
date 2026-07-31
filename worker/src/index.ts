@@ -38,7 +38,11 @@ type TransferInput = {
   note: string;
 };
 type BudgetItemInput = {
+  spaceId: string;
+  categoryId: string | null;
   name: string;
+  quantity: number;
+  unitPrice: number;
   plannedAmount: number;
 };
 
@@ -134,20 +138,19 @@ function parseMoney(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-function parseBudgetItems(value: unknown): BudgetItemInput[] | null {
-  if (!Array.isArray(value) || value.length > 80) return null;
-  const items: BudgetItemInput[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-    const detail = item as Record<string, unknown>;
-    const name = text(detail.name, 60);
-    const plannedAmount = detail.plannedAmount;
-    if (!name || typeof plannedAmount !== "number" || !Number.isSafeInteger(plannedAmount) || plannedAmount < 0) {
-      return null;
-    }
-    items.push({ name, plannedAmount });
-  }
-  return items;
+const MAX_BUDGET_ITEM_SUBTOTAL = 1_000_000_000_000;
+
+function parseBudgetItem(input: Record<string, unknown>): BudgetItemInput | null {
+  const spaceId = text(input.spaceId, 80);
+  const categoryId = typeof input.categoryId === "string" && input.categoryId ? text(input.categoryId, 80) : null;
+  const name = text(input.name, 60);
+  const quantity = input.quantity;
+  const unitPrice = input.unitPrice;
+  if (!spaceId || !name || typeof quantity !== "number" || !Number.isSafeInteger(quantity) || quantity <= 0 ||
+    typeof unitPrice !== "number" || !Number.isSafeInteger(unitPrice) || unitPrice < 0) return null;
+  const plannedAmount = quantity * unitPrice;
+  if (!Number.isSafeInteger(plannedAmount) || plannedAmount > MAX_BUDGET_ITEM_SUBTOTAL) return null;
+  return { spaceId, categoryId, name, quantity, unitPrice, plannedAmount };
 }
 
 function parseProject(input: Record<string, unknown>) {
@@ -284,47 +287,28 @@ const mapProjectSummary = (row: Record<string, unknown>) => ({
 
 const mapBudgetItem = (row: Record<string, unknown>) => ({
   id: row.id,
+  spaceId: row.space_id,
+  categoryId: row.category_id,
   name: row.name,
-  plannedAmount: row.planned_amount,
-  sortOrder: row.sort_order,
+  quantity: Number(row.quantity),
+  unitPrice: Number(row.unit_price),
+  plannedAmount: Number(row.planned_amount),
+  sortOrder: Number(row.sort_order),
 });
 
-const mapCategory = (row: Record<string, unknown>, items: Record<string, unknown>[] = []) => ({
+const mapCategory = (row: Record<string, unknown>) => ({
   id: row.id,
   name: row.name,
-  plannedAmount: row.planned_amount,
   color: row.color,
-  sortOrder: row.sort_order,
-  items: items.filter((item) => item.category_id === row.id).map(mapBudgetItem),
+  sortOrder: Number(row.sort_order),
 });
 
-async function categoryWithItems(env: Env, projectId: string, categoryId: string): Promise<Record<string, unknown> | null> {
-  const [category, itemResult] = await Promise.all([
-    env.DB.prepare(
-      "SELECT id, name, planned_amount, color, sort_order FROM budget_categories WHERE id = ? AND project_id = ?",
-    ).bind(categoryId, projectId).first<Record<string, unknown>>(),
-    env.DB.prepare(
-      "SELECT id, category_id, name, planned_amount, sort_order FROM budget_line_items WHERE category_id = ? AND project_id = ? ORDER BY sort_order, name",
-    ).bind(categoryId, projectId).all<Record<string, unknown>>(),
-  ]);
-  return category ? mapCategory(category, itemResult.results) : null;
-}
-
-async function replaceBudgetItems(
-  env: Env,
-  projectId: string,
-  categoryId: string,
-  items: BudgetItemInput[],
-  timestamp: string,
-): Promise<void> {
-  await env.DB.prepare("DELETE FROM budget_line_items WHERE category_id = ? AND project_id = ?")
-    .bind(categoryId, projectId).run();
-  for (const [index, item] of items.entries()) {
-    await env.DB.prepare(
-      "INSERT INTO budget_line_items (id, project_id, category_id, name, planned_amount, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    ).bind(newId(), projectId, categoryId, item.name, item.plannedAmount, index + 1, timestamp, timestamp).run();
-  }
-}
+const mapBudgetSpace = (row: Record<string, unknown>, items: Record<string, unknown>[]) => ({
+  id: row.id,
+  name: row.name,
+  sortOrder: Number(row.sort_order),
+  items: items.filter((item) => item.space_id === row.id).map(mapBudgetItem),
+});
 
 const mapAttachment = (row: Record<string, unknown>) => ({
   id: row.id,
@@ -407,7 +391,7 @@ async function projectCollection(request: Request, env: Env): Promise<Response> 
   if (request.method === "GET") {
     const result = await env.DB.prepare(`
       SELECT p.*,
-        COALESCE((SELECT SUM(c.planned_amount) FROM budget_categories c WHERE c.project_id = p.id), 0) AS planned,
+        COALESCE((SELECT SUM(item.planned_amount) FROM budget_line_items item WHERE item.project_id = p.id), 0) AS planned,
         COALESCE((SELECT SUM(e.amount) FROM ledger_entries e WHERE e.project_id = p.id AND e.kind = 'income' AND e.status = 'posted'), 0) AS received,
         COALESCE((SELECT SUM(CASE WHEN e.kind = 'expense' THEN e.amount ELSE 0 END)
           FROM ledger_entries e WHERE e.project_id = p.id AND e.status = 'posted'), 0) AS spent,
@@ -421,9 +405,14 @@ async function projectCollection(request: Request, env: Env): Promise<Response> 
     const input = parseProject(await requireJson(request));
     const projectId = newId();
     const timestamp = now();
-    await env.DB.prepare(
-      "INSERT INTO projects (id, name, address, status, currency, created_at, updated_at) VALUES (?, ?, ?, ?, 'TWD', ?, ?)",
-    ).bind(projectId, input.name, input.address, input.status, timestamp, timestamp).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO projects (id, name, address, status, currency, created_at, updated_at) VALUES (?, ?, ?, ?, 'TWD', ?, ?)",
+      ).bind(projectId, input.name, input.address, input.status, timestamp, timestamp),
+      env.DB.prepare(
+        "INSERT INTO budget_spaces (id, project_id, name, sort_order, created_at, updated_at) VALUES (?, ?, '未分空間', 1, ?, ?)",
+      ).bind(newId(), projectId, timestamp, timestamp),
+    ]);
     const project = await findProject(projectId, env);
     return json(mapProject(project!), { status: 201 });
   }
@@ -453,13 +442,16 @@ async function setProjectStatus(env: Env, projectId: string, status: ProjectStat
 }
 
 async function dashboard(env: Env, projectId: string): Promise<Response> {
-  const [project, categoryResult, itemResult, entryResult, attachmentResult, peopleResult, transferResult] = await Promise.all([
+  const [project, categoryResult, spaceResult, itemResult, entryResult, attachmentResult, peopleResult, transferResult] = await Promise.all([
     findProject(projectId, env),
     env.DB.prepare(
-      "SELECT id, name, planned_amount, color, sort_order FROM budget_categories WHERE project_id = ? ORDER BY sort_order, name",
+      "SELECT id, name, color, sort_order FROM budget_categories WHERE project_id = ? ORDER BY sort_order, name",
     ).bind(projectId).all<Record<string, unknown>>(),
     env.DB.prepare(
-      "SELECT id, category_id, name, planned_amount, sort_order FROM budget_line_items WHERE project_id = ? ORDER BY category_id, sort_order, name",
+      "SELECT id, name, sort_order FROM budget_spaces WHERE project_id = ? ORDER BY sort_order, name",
+    ).bind(projectId).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      "SELECT id, space_id, category_id, name, quantity, unit_price, planned_amount, sort_order FROM budget_line_items WHERE project_id = ? ORDER BY space_id, sort_order, name",
     ).bind(projectId).all<Record<string, unknown>>(),
     env.DB.prepare(
       "SELECT * FROM ledger_entries WHERE project_id = ? ORDER BY occurred_on DESC, created_at DESC",
@@ -477,48 +469,43 @@ async function dashboard(env: Env, projectId: string): Promise<Response> {
   if (!project) return json({ error: "找不到此工程案" }, { status: 404 });
   return json({
     project: mapProject(project),
-    categories: categoryResult.results.map((category) => mapCategory(category, itemResult.results)),
+    categories: categoryResult.results.map(mapCategory),
+    spaces: spaceResult.results.map((space) => mapBudgetSpace(space, itemResult.results)),
     entries: entryResult.results.map((entry) => mapEntry(entry, attachmentResult.results)),
     people: peopleResult.results.map(mapPerson),
     transfers: transferResult.results.map(mapTransfer),
   });
 }
-
 async function categories(request: Request, env: Env, projectId: string, categoryId?: string): Promise<Response> {
   if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   if (!categoryId && request.method === "GET") {
-    const [result, itemResult] = await Promise.all([
-      env.DB.prepare(
-        "SELECT id, name, planned_amount, color, sort_order FROM budget_categories WHERE project_id = ? ORDER BY sort_order, name",
-      ).bind(projectId).all<Record<string, unknown>>(),
-      env.DB.prepare(
-        "SELECT id, category_id, name, planned_amount, sort_order FROM budget_line_items WHERE project_id = ? ORDER BY category_id, sort_order, name",
-      ).bind(projectId).all<Record<string, unknown>>(),
-    ]);
-    return json(result.results.map((category) => mapCategory(category, itemResult.results)));
+    const result = await env.DB.prepare(
+      "SELECT id, name, color, sort_order FROM budget_categories WHERE project_id = ? ORDER BY sort_order, name",
+    ).bind(projectId).all<Record<string, unknown>>();
+    return json(result.results.map(mapCategory));
   }
   if (!categoryId && request.method === "POST") {
     const body = await requireJson(request);
     const name = text(body.name, 30);
-    const manualPlannedAmount =
-      typeof body.plannedAmount === "number" && Number.isSafeInteger(body.plannedAmount) && body.plannedAmount >= 0
-        ? body.plannedAmount
-        : null;
-    const items = body.items === undefined ? undefined : parseBudgetItems(body.items);
-    const plannedAmount = items?.reduce((sum, item) => sum + item.plannedAmount, 0) ?? manualPlannedAmount;
     const color = /^#[0-9a-fA-F]{6}$/.test(String(body.color)) ? String(body.color) : "#1d6f63";
-    if (!name || plannedAmount === null || items === null) return json({ error: "分類名稱、預算或細項不正確" }, { status: 400 });
+    if (!name) return json({ error: "請輸入分類名稱" }, { status: 400 });
+    const duplicate = await env.DB.prepare(
+      "SELECT id FROM budget_categories WHERE project_id = ? AND name = ? COLLATE NOCASE",
+    ).bind(projectId, name).first();
+    if (duplicate) return json({ error: "已有相同名稱的分類" }, { status: 409 });
     const max = await env.DB.prepare(
       "SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM budget_categories WHERE project_id = ?",
     ).bind(projectId).first<{ max_order: number }>();
     const id = newId();
     const timestamp = now();
     await env.DB.prepare(
-      "INSERT INTO budget_categories (id, project_id, name, planned_amount, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    ).bind(id, projectId, name, plannedAmount, color, (max?.max_order ?? 0) + 1, timestamp, timestamp).run();
-    if (items) await replaceBudgetItems(env, projectId, id, items, timestamp);
+      "INSERT INTO budget_categories (id, project_id, name, planned_amount, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?)",
+    ).bind(id, projectId, name, color, (max?.max_order ?? 0) + 1, timestamp, timestamp).run();
     await touchProject(projectId, env);
-    return json((await categoryWithItems(env, projectId, id))!, { status: 201 });
+    const category = await env.DB.prepare(
+      "SELECT id, name, color, sort_order FROM budget_categories WHERE id = ? AND project_id = ?",
+    ).bind(id, projectId).first<Record<string, unknown>>();
+    return json(mapCategory(category!), { status: 201 });
   }
   if (!categoryId) return json({ error: "找不到分類操作" }, { status: 404 });
   const existing = await env.DB.prepare(
@@ -528,37 +515,128 @@ async function categories(request: Request, env: Env, projectId: string, categor
   if (request.method === "PATCH") {
     const body = await requireJson(request);
     const name = text(body.name, 30);
-    const manualPlannedAmount =
-      typeof body.plannedAmount === "number" && Number.isSafeInteger(body.plannedAmount) && body.plannedAmount >= 0
-        ? body.plannedAmount
-        : null;
-    const items = body.items === undefined ? undefined : parseBudgetItems(body.items);
-    const plannedAmount = items?.reduce((sum, item) => sum + item.plannedAmount, 0) ?? manualPlannedAmount;
     const color = /^#[0-9a-fA-F]{6}$/.test(String(body.color)) ? String(body.color) : "#1d6f63";
-    if (!name || plannedAmount === null || items === null) return json({ error: "分類名稱、預算或細項不正確" }, { status: 400 });
-    const timestamp = now();
+    if (!name) return json({ error: "請輸入分類名稱" }, { status: 400 });
+    const duplicate = await env.DB.prepare(
+      "SELECT id FROM budget_categories WHERE project_id = ? AND name = ? COLLATE NOCASE AND id <> ?",
+    ).bind(projectId, name, categoryId).first();
+    if (duplicate) return json({ error: "已有相同名稱的分類" }, { status: 409 });
     await env.DB.prepare(
-      "UPDATE budget_categories SET name = ?, planned_amount = ?, color = ?, updated_at = ? WHERE id = ? AND project_id = ?",
-    ).bind(name, plannedAmount, color, timestamp, categoryId, projectId).run();
-    if (items) await replaceBudgetItems(env, projectId, categoryId, items, timestamp);
+      "UPDATE budget_categories SET name = ?, color = ?, updated_at = ? WHERE id = ? AND project_id = ?",
+    ).bind(name, color, now(), categoryId, projectId).run();
     await touchProject(projectId, env);
-    return json((await categoryWithItems(env, projectId, categoryId))!);
+    const category = await env.DB.prepare(
+      "SELECT id, name, color, sort_order FROM budget_categories WHERE id = ? AND project_id = ?",
+    ).bind(categoryId, projectId).first<Record<string, unknown>>();
+    return json(mapCategory(category!));
   }
   if (request.method === "DELETE") {
     const usage = await env.DB.prepare(
-      "SELECT COUNT(*) AS count FROM ledger_entries WHERE category_id = ? AND project_id = ?",
-    ).bind(categoryId, projectId).first<{ count: number }>();
-    if ((usage?.count ?? 0) > 0) {
-      return json({ error: "此分類已有帳務紀錄，請先重新分類相關紀錄。" }, { status: 409 });
-    }
-    await env.DB.prepare("DELETE FROM budget_categories WHERE id = ? AND project_id = ?")
-      .bind(categoryId, projectId).run();
+      "SELECT (SELECT COUNT(*) FROM ledger_entries WHERE category_id = ? AND project_id = ?) + (SELECT COUNT(*) FROM budget_line_items WHERE category_id = ? AND project_id = ?) AS count",
+    ).bind(categoryId, projectId, categoryId, projectId).first<{ count: number }>();
+    if ((usage?.count ?? 0) > 0) return json({ error: "此分類已有帳務或預算項目，請先重新分類相關紀錄。" }, { status: 409 });
+    await env.DB.prepare("DELETE FROM budget_categories WHERE id = ? AND project_id = ?").bind(categoryId, projectId).run();
     await touchProject(projectId, env);
     return new Response(null, { status: 204 });
   }
   return json({ error: "不支援的方法" }, { status: 405 });
 }
 
+async function budgetSpaces(request: Request, env: Env, projectId: string, spaceId?: string): Promise<Response> {
+  if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
+  if (!spaceId && request.method === "GET") {
+    const [spaces, items] = await Promise.all([
+      env.DB.prepare("SELECT id, name, sort_order FROM budget_spaces WHERE project_id = ? ORDER BY sort_order, name").bind(projectId).all<Record<string, unknown>>(),
+      env.DB.prepare("SELECT id, space_id, category_id, name, quantity, unit_price, planned_amount, sort_order FROM budget_line_items WHERE project_id = ? ORDER BY space_id, sort_order, name").bind(projectId).all<Record<string, unknown>>(),
+    ]);
+    return json(spaces.results.map((space) => mapBudgetSpace(space, items.results)));
+  }
+  if (!spaceId && request.method === "POST") {
+    const body = await requireJson(request);
+    const name = text(body.name, 30);
+    if (!name) return json({ error: "請輸入空間名稱" }, { status: 400 });
+    const duplicate = await env.DB.prepare("SELECT id FROM budget_spaces WHERE project_id = ? AND name = ? COLLATE NOCASE").bind(projectId, name).first();
+    if (duplicate) return json({ error: "已有相同名稱的空間" }, { status: 409 });
+    const max = await env.DB.prepare("SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM budget_spaces WHERE project_id = ?").bind(projectId).first<{ max_order: number }>();
+    const id = newId();
+    const timestamp = now();
+    await env.DB.prepare("INSERT INTO budget_spaces (id, project_id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(id, projectId, name, (max?.max_order ?? 0) + 1, timestamp, timestamp).run();
+    await touchProject(projectId, env);
+    return json(mapBudgetSpace({ id, name, sort_order: (max?.max_order ?? 0) + 1 }, []), { status: 201 });
+  }
+  if (!spaceId) return json({ error: "找不到空間操作" }, { status: 404 });
+  const existing = await env.DB.prepare("SELECT id, name, sort_order FROM budget_spaces WHERE id = ? AND project_id = ?").bind(spaceId, projectId).first<Record<string, unknown>>();
+  if (!existing) return json({ error: "找不到此空間" }, { status: 404 });
+  if (request.method === "PATCH") {
+    const body = await requireJson(request);
+    const name = text(body.name, 30);
+    if (!name) return json({ error: "請輸入空間名稱" }, { status: 400 });
+    const duplicate = await env.DB.prepare("SELECT id FROM budget_spaces WHERE project_id = ? AND name = ? COLLATE NOCASE AND id <> ?").bind(projectId, name, spaceId).first();
+    if (duplicate) return json({ error: "已有相同名稱的空間" }, { status: 409 });
+    await env.DB.prepare("UPDATE budget_spaces SET name = ?, updated_at = ? WHERE id = ? AND project_id = ?").bind(name, now(), spaceId, projectId).run();
+    await touchProject(projectId, env);
+    const items = await env.DB.prepare(
+      "SELECT id, space_id, category_id, name, quantity, unit_price, planned_amount, sort_order FROM budget_line_items WHERE project_id = ? AND space_id = ? ORDER BY sort_order, name",
+    ).bind(projectId, spaceId).all<Record<string, unknown>>();
+    return json(mapBudgetSpace({ ...existing, name }, items.results));
+  }
+  if (request.method === "DELETE") {
+    const usage = await env.DB.prepare("SELECT COUNT(*) AS count FROM budget_line_items WHERE space_id = ? AND project_id = ?").bind(spaceId, projectId).first<{ count: number }>();
+    if ((usage?.count ?? 0) > 0) return json({ error: "此空間仍有預算項目，請先移動或刪除項目。" }, { status: 409 });
+    await env.DB.prepare("DELETE FROM budget_spaces WHERE id = ? AND project_id = ?").bind(spaceId, projectId).run();
+    await touchProject(projectId, env);
+    return new Response(null, { status: 204 });
+  }
+  return json({ error: "不支援的方法" }, { status: 405 });
+}
+
+async function budgetItems(request: Request, env: Env, projectId: string, itemId?: string): Promise<Response> {
+  if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
+  if (!itemId && request.method === "GET") {
+    const result = await env.DB.prepare("SELECT id, space_id, category_id, name, quantity, unit_price, planned_amount, sort_order FROM budget_line_items WHERE project_id = ? ORDER BY space_id, sort_order, name").bind(projectId).all<Record<string, unknown>>();
+    return json(result.results.map(mapBudgetItem));
+  }
+  if (!itemId && request.method !== "POST") return json({ error: "找不到預算項目操作" }, { status: 404 });
+  const existing = itemId ? await env.DB.prepare("SELECT id, space_id, category_id, name, quantity, unit_price, planned_amount, sort_order FROM budget_line_items WHERE id = ? AND project_id = ?").bind(itemId, projectId).first<Record<string, unknown>>() : null;
+  if (itemId && !existing) return json({ error: "找不到此預算項目" }, { status: 404 });
+  if (request.method === "POST" || request.method === "PATCH") {
+    const input = parseBudgetItem(await requireJson(request));
+    if (!input) return json({ error: "空間、項目、數量、單價或小計不正確" }, { status: 400 });
+    const space = await env.DB.prepare("SELECT id FROM budget_spaces WHERE id = ? AND project_id = ?").bind(input.spaceId, projectId).first();
+    if (!space) return json({ error: "請選擇正確的空間" }, { status: 400 });
+    if (input.categoryId) {
+      const category = await env.DB.prepare("SELECT id FROM budget_categories WHERE id = ? AND project_id = ?").bind(input.categoryId, projectId).first();
+      if (!category) return json({ error: "分類不存在" }, { status: 400 });
+    }
+    const timestamp = now();
+    if (!itemId) {
+      const max = await env.DB.prepare("SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM budget_line_items WHERE space_id = ?").bind(input.spaceId).first<{ max_order: number }>();
+      const id = newId();
+      await env.DB.prepare("INSERT INTO budget_line_items (id, project_id, space_id, category_id, name, quantity, unit_price, planned_amount, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(id, projectId, input.spaceId, input.categoryId, input.name, input.quantity, input.unitPrice, input.plannedAmount, (max?.max_order ?? 0) + 1, timestamp, timestamp).run();
+      await touchProject(projectId, env);
+      const item = await env.DB.prepare("SELECT id, space_id, category_id, name, quantity, unit_price, planned_amount, sort_order FROM budget_line_items WHERE id = ?").bind(id).first<Record<string, unknown>>();
+      return json(mapBudgetItem(item!), { status: 201 });
+    }
+    let sortOrder = Number(existing!.sort_order);
+    if (existing!.space_id !== input.spaceId) {
+      const max = await env.DB.prepare("SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM budget_line_items WHERE space_id = ?").bind(input.spaceId).first<{ max_order: number }>();
+      sortOrder = (max?.max_order ?? 0) + 1;
+    }
+    await env.DB.prepare("UPDATE budget_line_items SET space_id = ?, category_id = ?, name = ?, quantity = ?, unit_price = ?, planned_amount = ?, sort_order = ?, updated_at = ? WHERE id = ? AND project_id = ?")
+      .bind(input.spaceId, input.categoryId, input.name, input.quantity, input.unitPrice, input.plannedAmount, sortOrder, timestamp, itemId, projectId).run();
+    await touchProject(projectId, env);
+    const item = await env.DB.prepare("SELECT id, space_id, category_id, name, quantity, unit_price, planned_amount, sort_order FROM budget_line_items WHERE id = ?").bind(itemId).first<Record<string, unknown>>();
+    return json(mapBudgetItem(item!));
+  }
+  if (request.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM budget_line_items WHERE id = ? AND project_id = ?").bind(itemId, projectId).run();
+    await touchProject(projectId, env);
+    return new Response(null, { status: 204 });
+  }
+  return json({ error: "不支援的方法" }, { status: 405 });
+}
 async function people(request: Request, env: Env, projectId: string, personId?: string): Promise<Response> {
   if (!await findProject(projectId, env)) return json({ error: "找不到此工程案" }, { status: 404 });
   if (!personId && request.method === "GET") {
@@ -902,6 +980,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
   }
   const dashboardMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/dashboard$/);
   if (dashboardMatch && request.method === "GET") return dashboard(env, dashboardMatch[1]);
+  const budgetSpaceMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/budget-spaces(?:\/([^/]+))?$/);
+  if (budgetSpaceMatch) return budgetSpaces(request, env, budgetSpaceMatch[1], budgetSpaceMatch[2]);
+  const budgetItemMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/budget-items(?:\/([^/]+))?$/);
+  if (budgetItemMatch) return budgetItems(request, env, budgetItemMatch[1], budgetItemMatch[2]);
   const peopleMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/people(?:\/([^/]+))?$/);
   if (peopleMatch) return people(request, env, peopleMatch[1], peopleMatch[2]);
   const transferMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/transfers(?:\/([^/]+))?$/);

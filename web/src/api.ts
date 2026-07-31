@@ -1,5 +1,7 @@
 import { calculateTotals } from "./finance";
 import type {
+  BudgetItem,
+  BudgetSpace,
   Category,
   DashboardPayload,
   EntryKind,
@@ -42,9 +44,19 @@ export interface EntryInput {
 
 export interface CategoryInput {
   name: string;
-  plannedAmount: number;
   color: string;
-  items: Array<Pick<Category["items"][number], "name" | "plannedAmount">>;
+}
+
+export interface BudgetSpaceInput {
+  name: string;
+}
+
+export interface BudgetItemInput {
+  spaceId: string;
+  categoryId: string | null;
+  name: string;
+  quantity: number;
+  unitPrice: number;
 }
 
 export interface PersonInput {
@@ -108,7 +120,7 @@ export async function login(code: string): Promise<void> {
 
 function demoProjectSummary(project: Project): ProjectSummary {
   const dashboard = demoDashboards.get(project.id)!;
-  const totals = calculateTotals(dashboard.categories, dashboard.entries);
+  const totals = calculateTotals(dashboard.spaces, dashboard.entries);
   return { ...project, planned: totals.planned, received: totals.received, spent: totals.spent, pending: totals.pending };
 }
 
@@ -134,7 +146,7 @@ export async function createProject(input: ProjectInput): Promise<Project> {
       updatedAt: timestamp,
     };
     demoProjects.push(project);
-    demoDashboards.set(project.id, { project, categories: [], entries: [], people: [], transfers: [] });
+    demoDashboards.set(project.id, { project, categories: [], spaces: [{ id: crypto.randomUUID(), name: "未分空間", sortOrder: 1, items: [] }], entries: [], people: [], transfers: [] });
     return clone(project);
   }
   return request<Project>("/api/projects", { method: "POST", body: JSON.stringify(input) });
@@ -188,27 +200,20 @@ export async function saveCategory(
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;
     if (categoryId) {
-      const item = dashboard.categories.find((category) => category.id === categoryId)!;
-      Object.assign(item, {
-        ...input,
-        items: input.items.map((detail, index) => ({
-          ...detail,
-          id: item.items[index]?.id ?? crypto.randomUUID(),
-          sortOrder: index + 1,
-        })),
-      });
+      const category = dashboard.categories.find((item) => item.id === categoryId);
+      if (!category) throw new Error("找不到此分類");
+      Object.assign(category, input);
       touchDemo(projectId);
-      return clone(item);
+      return clone(category);
     }
-    const item: Category = {
-      ...input,
-      items: input.items.map((detail, index) => ({ ...detail, id: crypto.randomUUID(), sortOrder: index + 1 })),
+    const category: Category = {
       id: crypto.randomUUID(),
+      ...input,
       sortOrder: dashboard.categories.length + 1,
     };
-    dashboard.categories.push(item);
+    dashboard.categories.push(category);
     touchDemo(projectId);
-    return clone(item);
+    return clone(category);
   }
   const path = `/api/projects/${projectId}/categories${categoryId ? `/${categoryId}` : ""}`;
   return request<Category>(path, {
@@ -220,8 +225,9 @@ export async function saveCategory(
 export async function deleteCategory(projectId: string, categoryId: string): Promise<void> {
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;
-    if (dashboard.entries.some((entry) => entry.categoryId === categoryId)) {
-      throw new Error("此分類已有帳務紀錄，請先重新分類相關紀錄。");
+    if (dashboard.entries.some((entry) => entry.categoryId === categoryId) ||
+      dashboard.spaces.some((space) => space.items.some((item) => item.categoryId === categoryId))) {
+      throw new Error("此分類已有帳務或預算項目，請先重新分類相關紀錄。");
     }
     dashboard.categories = dashboard.categories.filter((item) => item.id !== categoryId);
     touchDemo(projectId);
@@ -230,6 +236,86 @@ export async function deleteCategory(projectId: string, categoryId: string): Pro
   await request<void>(`/api/projects/${projectId}/categories/${categoryId}`, { method: "DELETE" });
 }
 
+
+export async function saveBudgetSpace(
+  projectId: string,
+  input: BudgetSpaceInput,
+  spaceId?: string,
+): Promise<BudgetSpace> {
+  if (isDemoMode) {
+    const dashboard = demoDashboards.get(projectId)!;
+    const duplicate = dashboard.spaces.find((space) => space.name.localeCompare(input.name, "zh-Hant", { sensitivity: "accent" }) === 0 && space.id !== spaceId);
+    if (duplicate) throw new Error("已有相同名稱的空間");
+    if (spaceId) {
+      const space = dashboard.spaces.find((item) => item.id === spaceId);
+      if (!space) throw new Error("找不到此空間");
+      space.name = input.name;
+      touchDemo(projectId);
+      return clone(space);
+    }
+    const space: BudgetSpace = { id: crypto.randomUUID(), name: input.name, sortOrder: dashboard.spaces.length + 1, items: [] };
+    dashboard.spaces.push(space);
+    touchDemo(projectId);
+    return clone(space);
+  }
+  const path = `/api/projects/${projectId}/budget-spaces${spaceId ? `/${spaceId}` : ""}`;
+  return request<BudgetSpace>(path, { method: spaceId ? "PATCH" : "POST", body: JSON.stringify(input) });
+}
+
+export async function deleteBudgetSpace(projectId: string, spaceId: string): Promise<void> {
+  if (isDemoMode) {
+    const dashboard = demoDashboards.get(projectId)!;
+    const space = dashboard.spaces.find((item) => item.id === spaceId);
+    if (space?.items.length) throw new Error("此空間仍有預算項目，請先移動或刪除項目。");
+    dashboard.spaces = dashboard.spaces.filter((item) => item.id !== spaceId);
+    touchDemo(projectId);
+    return;
+  }
+  await request<void>(`/api/projects/${projectId}/budget-spaces/${spaceId}`, { method: "DELETE" });
+}
+
+export async function saveBudgetItem(
+  projectId: string,
+  input: BudgetItemInput,
+  itemId?: string,
+): Promise<BudgetItem> {
+  if (isDemoMode) {
+    const dashboard = demoDashboards.get(projectId)!;
+    const targetSpace = dashboard.spaces.find((space) => space.id === input.spaceId);
+    if (!targetSpace) throw new Error("請選擇空間");
+    if (input.categoryId && !dashboard.categories.some((category) => category.id === input.categoryId)) throw new Error("分類不存在");
+    const plannedAmount = input.quantity * input.unitPrice;
+    if (itemId) {
+      const sourceSpace = dashboard.spaces.find((space) => space.items.some((item) => item.id === itemId));
+      const item = sourceSpace?.items.find((candidate) => candidate.id === itemId);
+      if (!item || !sourceSpace) throw new Error("找不到此預算項目");
+      if (sourceSpace.id !== targetSpace.id) sourceSpace.items = sourceSpace.items.filter((candidate) => candidate.id !== itemId);
+      Object.assign(item, input, { plannedAmount });
+      if (sourceSpace.id !== targetSpace.id) {
+        item.sortOrder = targetSpace.items.length + 1;
+        targetSpace.items.push(item);
+      }
+      touchDemo(projectId);
+      return clone(item);
+    }
+    const item: BudgetItem = { id: crypto.randomUUID(), ...input, plannedAmount, sortOrder: targetSpace.items.length + 1 };
+    targetSpace.items.push(item);
+    touchDemo(projectId);
+    return clone(item);
+  }
+  const path = `/api/projects/${projectId}/budget-items${itemId ? `/${itemId}` : ""}`;
+  return request<BudgetItem>(path, { method: itemId ? "PATCH" : "POST", body: JSON.stringify(input) });
+}
+
+export async function deleteBudgetItem(projectId: string, itemId: string): Promise<void> {
+  if (isDemoMode) {
+    const dashboard = demoDashboards.get(projectId)!;
+    dashboard.spaces.forEach((space) => { space.items = space.items.filter((item) => item.id !== itemId); });
+    touchDemo(projectId);
+    return;
+  }
+  await request<void>(`/api/projects/${projectId}/budget-items/${itemId}`, { method: "DELETE" });
+}
 export async function savePerson(projectId: string, input: PersonInput, personId?: string): Promise<Person> {
   if (isDemoMode) {
     const dashboard = demoDashboards.get(projectId)!;

@@ -1,4 +1,4 @@
-import type { Category, FundTransfer, LedgerEntry } from "./types";
+import type { BudgetSpace, FundTransfer, LedgerEntry } from "./types";
 
 export interface Totals {
   planned: number;
@@ -131,8 +131,17 @@ export function buildCashbookLedger(
   return { deposited, withdrawn, balance, activities: sortCashbookActivities(chronological, "desc") };
 }
 
-export function calculateTotals(categories: Category[], entries: LedgerEntry[]): Totals {
-  const planned = categories.reduce((sum, category) => sum + category.plannedAmount, 0);
+export const MAX_BUDGET_ITEM_SUBTOTAL = 1_000_000_000_000;
+
+export function calculateBudgetItemSubtotal(quantity: number, unitPrice: number): number | null {
+  if (!Number.isSafeInteger(quantity) || quantity <= 0 || !Number.isSafeInteger(unitPrice) || unitPrice < 0) return null;
+  const subtotal = quantity * unitPrice;
+  return Number.isSafeInteger(subtotal) && subtotal <= MAX_BUDGET_ITEM_SUBTOTAL ? subtotal : null;
+}
+
+export function calculateTotals(spaces: BudgetSpace[], entries: LedgerEntry[]): Totals {
+  const planned = spaces.reduce((sum, space) => sum +
+    space.items.reduce((itemSum, item) => itemSum + item.quantity * item.unitPrice, 0), 0);
   let received = 0;
   let spent = 0;
   let pending = 0;
