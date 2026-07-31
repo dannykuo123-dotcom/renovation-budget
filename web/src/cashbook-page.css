@@ -514,23 +514,67 @@
 .cashbook-split-tabs span { margin-left: 4px; opacity: .72; }
 
 @media (max-width: 760px) {
-  .cashbook-summary-shell { grid-template-columns: minmax(0, 1fr) 54px; border-radius: 15px; }
-  .cashbook-summary-strip.cashbook-summary-four { min-width: 420px; }
+  .cashbook-summary-shell {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: hidden;
+    border-radius: 15px;
+  }
+  .cashbook-summary-scroll {
+    overflow-x: hidden;
+  }
+  .cashbook-summary-strip.cashbook-summary-four {
+    width: 100%;
+    min-width: 0;
+  }
   .cashbook-summary-strip.cashbook-summary-four article {
-    min-height: 72px;
-    gap: 5px;
-    padding: 10px 12px;
+    min-width: 0;
+    min-height: 66px;
+    gap: 4px;
+    padding: 9px 7px;
     border-bottom: 0;
   }
   .cashbook-summary-strip.cashbook-summary-four article:nth-child(2) { border-right: 1px solid #edf0eb; }
-  .cashbook-summary-strip.cashbook-summary-four small { font-size: 9px; }
-  .cashbook-summary-strip.cashbook-summary-four strong { font-size: 21px; }
+  .cashbook-summary-strip.cashbook-summary-four small {
+    overflow: hidden;
+    font-size: 8px;
+    letter-spacing: .04em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cashbook-summary-strip.cashbook-summary-four strong {
+    min-width: 0;
+    overflow: hidden;
+    font-size: clamp(13px, 4.3vw, 18px);
+    text-overflow: clip;
+    white-space: nowrap;
+  }
   .cashbook-create-toggle { width: 42px; height: 42px; border-radius: 12px; font-size: 24px; }
-  .cashbook-filter-deck { padding: 9px 10px; }
-  .cashbook-filter-line { gap: 10px; }
-  .cashbook-filter-chip { min-height: 32px; padding: 5px 9px; }
-  .cashbook-person-filter { width: 33px; height: 33px; }
-  .cashbook-person-avatar { width: 31px; height: 31px; }
+  .cashbook-filter-deck {
+    margin-top: 8px;
+    padding: 6px 7px;
+    border-radius: 13px;
+  }
+  .cashbook-filter-line { gap: 5px; }
+  .cashbook-filter-group,
+  .cashbook-filter-options,
+  .cashbook-people-options { gap: 3px; }
+  .cashbook-filter-label {
+    margin-right: 0;
+    font-size: 9px;
+  }
+  .cashbook-filter-divider { height: 24px; }
+  .cashbook-filter-chip {
+    min-height: 27px;
+    padding: 4px 7px;
+    border-radius: 8px;
+    font-size: 10px;
+  }
+  .cashbook-person-filter { width: 27px; height: 27px; }
+  .cashbook-person-avatar {
+    width: 27px;
+    height: 27px;
+    font-size: 10px;
+  }
   .cashbook-list-toolbar { flex-wrap: wrap; }
   .cashbook-search-input { order: 2; width: 100%; }
   .cashbook-date-sort span { display: none; }
