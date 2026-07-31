@@ -70,15 +70,16 @@
 .budget-add-menu {
   position: absolute;
   z-index: 20;
+  isolation: isolate;
   top: calc(100% - 2px);
   right: 10px;
   width: 220px;
   padding: 7px;
+  overflow: hidden;
   border: 1px solid rgba(47, 72, 64, .12);
   border-radius: 16px;
-  background: rgba(255, 255, 253, .98);
+  background: #fffffd;
   box-shadow: 0 22px 52px rgba(31, 50, 43, .16);
-  backdrop-filter: blur(20px);
 }
 
 .budget-add-menu[hidden] { display: none; }
