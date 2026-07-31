@@ -554,26 +554,31 @@
     padding: 6px 7px;
     border-radius: 13px;
   }
-  .cashbook-filter-line { gap: 5px; }
+  .cashbook-filter-line {
+    width: max-content;
+    min-width: 100%;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
   .cashbook-filter-group,
   .cashbook-filter-options,
   .cashbook-people-options { gap: 3px; }
   .cashbook-filter-label {
     margin-right: 0;
-    font-size: 9px;
+    font-size: 10px;
   }
-  .cashbook-filter-divider { height: 24px; }
+  .cashbook-filter-divider { height: 26px; }
   .cashbook-filter-chip {
-    min-height: 27px;
-    padding: 4px 7px;
-    border-radius: 8px;
-    font-size: 10px;
+    min-height: 30px;
+    padding: 5px 7px;
+    border-radius: 9px;
+    font-size: 11px;
   }
-  .cashbook-person-filter { width: 27px; height: 27px; }
+  .cashbook-person-filter { width: 30px; height: 30px; }
   .cashbook-person-avatar {
-    width: 27px;
-    height: 27px;
-    font-size: 10px;
+    width: 30px;
+    height: 30px;
+    font-size: 11px;
   }
   .cashbook-list-toolbar { flex-wrap: wrap; }
   .cashbook-search-input { order: 2; width: 100%; }
